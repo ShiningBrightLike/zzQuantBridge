@@ -2,7 +2,47 @@
 
 面向个人研究与交易的 **vectorbt + 人工执行** 量化系统。项目自动获取和整理行情数据，运行策略与回测，维护模拟或真实组合状态，并生成可供人工确认的交易建议；实际下单由人在证券公司交易系统中完成，成交结果再回录系统。
 
-> 当前仓库处于项目规划阶段。下面的目录、CLI 和模块接口是第一版的目标设计，随着实现推进会持续更新。
+> 当前仓库已完成 M0 项目骨架、M1 数据层和组合/建议层的第一批实现：配置可读取，CLI 统一入口可创建运行目录和输入清单，支持本地 OHLCV 校验、Parquet 快照归档、AkShare 可选适配器、可插拔的均线目标仓位策略、SQLite 成交账本和人工交易建议。vectorbt 回测报告会在后续里程碑中接入。
+
+## 开始使用
+
+使用 Python 3.11 或更高版本安装项目及测试依赖：
+
+```bash
+python -m pip install -e ".[data,backtest,test]"
+```
+
+也可以直接安装当前完整依赖列表：
+
+```bash
+python -m pip install -r requirements.txt
+```
+
+需要在线获取 A 股数据时安装数据依赖：
+
+```bash
+python -m pip install -e ".[data]"
+```
+
+每个 CLI 命令都会创建 `runs/<date>/<run_id>/`，并写入 `input_manifest.json` 和当前状态文件。M0 阶段命令先负责建立可追溯的运行边界：
+
+```bash
+python -m quant download --date 2026-10-08 --config configs/universe.yaml
+python -m quant backtest --config configs/strategy.yaml
+python -m quant validate-data --file data/processed/sample.csv --symbols 600000
+python -m quant reconcile --file fills.csv --db db/portfolio.sqlite --initial-cash 100000
+```
+
+`download` 默认使用 AkShare；需要离线复现时可以指定本地快照：
+
+```bash
+python -m quant download --provider local --file snapshot.csv \
+  --config configs/universe.yaml --start 2026-01-01 --end 2026-10-08
+```
+
+`validate-data` 会在运行目录写入 `data_quality.json`；缺失、重复或异常 OHLCV 会标记为 `BLOCKED`。`backtest` 等命令的回测业务将在后续阶段填充；在实现完成前，运行状态会标记为 `INITIALIZED`，不会生成可执行交易建议。
+
+`reconcile` 会幂等导入成交 CSV，并在运行目录保存 `portfolio_snapshot.json`。CSV 至少需要 `trade_id,symbol,side,quantity,price,fee,executed_at` 列。
 
 ## 项目目标
 

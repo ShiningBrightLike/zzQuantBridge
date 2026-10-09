@@ -1,0 +1,8 @@
+max_single_weight: 0.2
+max_turnover: 0.5
+cash_buffer: 0.1
+min_order_quantity: 1
+lot_size: 100
+commission_rate: 0.0003
+sell_stamp_duty_rate: 0.0005
+slippage_bps: 5

@@ -1,0 +1,6 @@
+name: moving_average_baseline
+fast_window: 20
+slow_window: 60
+max_positions: 5
+max_single_weight: 0.2
+model_version: ma-baseline-v1

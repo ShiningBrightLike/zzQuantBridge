@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "zzquantbridge"
+version = "0.1.0"
+description = "A vectorbt research and manually executed trading workflow."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+data = ["akshare>=1.15", "pandas>=2.0", "pyarrow>=14.0"]
+backtest = ["vectorbt>=0.26", "pandas>=2.0"]
+test = ["pytest>=8.0"]
+
+[project.scripts]
+quant = "quant.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

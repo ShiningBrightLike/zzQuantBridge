@@ -1,0 +1,6 @@
+symbols:
+  - "600000"
+  - "000001"
+market: china_a_share
+asset_type: equity
+timeframe: 1d

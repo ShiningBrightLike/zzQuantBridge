@@ -1,0 +1,13 @@
+# Core configuration
+PyYAML>=6.0
+
+# Market data and Parquet archives
+pandas>=2.0
+pyarrow>=14.0
+akshare>=1.15
+
+# Backtesting
+vectorbt>=0.26
+
+# Development and tests
+pytest>=8.0
