@@ -26,3 +26,18 @@ def test_reusing_trade_id_with_different_values_is_rejected(tmp_path):
 
     with pytest.raises(TradeConflictError):
         store.append_trade(ExecutedTrade("t-1", "600000", "BUY", 200, 10.0, 1.0, timestamp))
+
+
+def test_trade_batch_is_atomic_on_conflict(tmp_path):
+    timestamp = datetime(2026, 10, 8, tzinfo=timezone.utc)
+    store = PortfolioStore(tmp_path / "portfolio.sqlite")
+    store.append_trade(ExecutedTrade("t-1", "600000", "BUY", 100, 10.0, 1.0, timestamp))
+
+    with pytest.raises(TradeConflictError):
+        store.append_trades(
+            [
+                ExecutedTrade("t-2", "600000", "BUY", 100, 10.0, 1.0, timestamp),
+                ExecutedTrade("t-1", "600000", "BUY", 200, 10.0, 1.0, timestamp),
+            ]
+        )
+    assert [trade.trade_id for trade in store.trades()] == ["t-1"]

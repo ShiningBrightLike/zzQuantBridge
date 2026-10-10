@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="hero">
+  <div>
+    <p class="eyebrow">MANUAL EXECUTION DASHBOARD</p>
+    <h1>研究和执行状态</h1>
+    <p class="muted">数据、策略、组合和人工成交记录集中在一个可追溯的本地工作台。</p>
+  </div>
+  <span class="status status-pass">本机模式</span>
+</section>
+<section class="cards">
+  <article class="card"><span class="label">运行中</span><strong>{{ active_run_id or "无" }}</strong></article>
+  <article class="card"><span class="label">最近运行</span><strong>{{ runs|length }}</strong></article>
+  <article class="card"><span class="label">风险状态</span><strong class="status-text">待检查</strong></article>
+</section>
+<section class="panel action-panel">
+  <div class="panel-heading"><h2>启动任务</h2><span id="job-message" class="muted">后台运行，页面会显示 run_id</span></div>
+  <div class="fill-fields">
+    <input id="run-symbols" placeholder="symbols（逗号分隔，留空用 configs/universe.yaml）">
+    <input id="run-start" placeholder="start 2025-10-10">
+    <input id="run-end" placeholder="end 2026-10-10">
+    <select id="run-provider"><option value="akshare">akshare</option><option value="local">local</option></select>
+    <input id="run-file" placeholder="local CSV/Parquet 路径（provider=local）">
+  </div>
+  <div class="actions"><button class="button" data-run-kind="download">下载行情</button><button class="button" data-run-kind="backtest">运行回测</button><button class="button" data-run-kind="generate-signals">生成建议</button></div>
+</section>
+<section class="panel">
+  <div class="panel-heading"><h2>最近运行</h2><span class="muted">审计目录 runs/</span></div>
+  {% if runs %}
+  <table><thead><tr><th>Run ID</th><th>命令</th><th>状态</th><th></th></tr></thead><tbody>
+  {% for run in runs %}<tr><td class="mono">{{ run.run_id }}</td><td>{{ run.command }}</td><td><span class="status status-{{ run.status|lower }}">{{ run.status }}</span></td><td><a href="/runs/{{ run.run_id }}">查看</a></td></tr>{% endfor %}
+  </tbody></table>
+  {% else %}<div class="empty">还没有运行记录。请从 CLI 或 API 启动一次研究任务。</div>{% endif %}
+</section>
+{% endblock %}

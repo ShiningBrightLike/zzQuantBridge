@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-heading">
+  <div><p class="eyebrow">LOCAL MAINTENANCE</p><h1>历史清理</h1></div>
+  <span class="status status-error">不可恢复</span>
+</div>
+
+<section class="panel">
+  <div class="panel-heading"><h2>当前历史</h2><span class="muted">删除前请先核对</span></div>
+  <table>
+    <thead><tr><th>类别</th><th>数量</th><th>占用 (MB)</th><th>路径</th></tr></thead>
+    <tbody>
+      <tr><td>运行记录 runs/</td><td>{{ summary.runs.count }}</td><td>{{ format_mb(summary.runs.bytes) }}</td><td class="mono">{{ summary.paths.runs_dir }}</td></tr>
+      <tr><td>行情快照 raw/ processed/</td><td>{{ summary.snapshots.count }}</td><td>{{ format_mb(summary.snapshots.bytes) }}</td><td class="mono">{{ summary.paths.data_dir }}</td></tr>
+      <tr><td>数据清单 metadata/</td><td>{{ summary.metadata.count }}</td><td>{{ format_mb(summary.metadata.bytes) }}</td><td class="mono">{{ summary.paths.data_dir }}</td></tr>
+      <tr><td>组合数据库</td><td>{{ summary.database.count }}</td><td>{{ format_mb(summary.database.bytes) }}</td><td class="mono">{{ summary.paths.db_path }}</td></tr>
+      <tr><td>合计</td><td></td><td><strong>{{ total_mb }}</strong></td><td></td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section class="panel risk-panel">
+  <div class="panel-heading"><h2>清除</h2><span class="muted">本地操作，无云端备份</span></div>
+  <p class="muted">勾选要清除的内容。组合数据库包含实际成交记录，清除后无法恢复，除非你另外备份过。</p>
+  <div class="fill-fields">
+    <label class="check"><input type="checkbox" id="scope-runs" checked> 运行记录（runs/）</label>
+    <label class="check"><input type="checkbox" id="scope-data"> 行情快照（data/raw、processed、metadata）</label>
+    <label class="check"><input type="checkbox" id="scope-database"> 组合数据库（含成交记录）</label>
+  </div>
+  <div class="fill-fields">
+    <input id="keep-days" type="number" min="0" placeholder="保留最近 N 天（留空表示全部清除）">
+    <input id="confirm-token" placeholder="输入 CLEAR 以确认">
+  </div>
+  <div class="actions">
+    <button class="button" id="clear-history">清除所选历史</button>
+    <span id="clear-message" class="muted">尚未执行</span>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="panel-heading"><h2>执行结果</h2><span class="muted">同时写入 runs/ 审计目录</span></div>
+  <pre id="clear-result">尚未执行。</pre>
+</section>
+{% endblock %}

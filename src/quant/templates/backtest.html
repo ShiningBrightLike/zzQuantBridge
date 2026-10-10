@@ -1,0 +1,8 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-heading"><div><p class="eyebrow">RESEARCH</p><h1>回测</h1></div><span class="status status-blocked">尚未运行</span></div>
+<section class="panel"><div id="backtest-chart" class="chart"></div></section>
+<p class="muted">{{ message }}</p>
+<section class="panel"><div class="panel-heading"><h2>回测运行</h2><span class="muted">{{ runs|length }} 条记录</span></div>{% if runs %}<table><thead><tr><th>Run ID</th><th>命令</th><th>状态</th></tr></thead><tbody>{% for run in runs %}<tr><td class="mono">{{ run.run_id }}</td><td>{{ run.command }}</td><td>{{ run.status }}</td></tr>{% endfor %}</tbody></table>{% else %}<div class="empty">暂无回测产物。</div>{% endif %}</section>
+<script>window.addEventListener('load',()=>{const f={{ figure|tojson }}; if(window.Plotly) Plotly.newPlot('backtest-chart',f.data,f.layout,{responsive:true});});</script>
+{% endblock %}

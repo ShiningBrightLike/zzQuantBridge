@@ -2,7 +2,7 @@
 
 面向个人研究与交易的 **vectorbt + 人工执行** 量化系统。项目自动获取和整理行情数据，运行策略与回测，维护模拟或真实组合状态，并生成可供人工确认的交易建议；实际下单由人在证券公司交易系统中完成，成交结果再回录系统。
 
-> 当前仓库已完成 M0 项目骨架、M1 数据层和组合/建议层的第一批实现：配置可读取，CLI 统一入口可创建运行目录和输入清单，支持本地 OHLCV 校验、Parquet 快照归档、AkShare 可选适配器、可插拔的均线目标仓位策略、SQLite 成交账本和人工交易建议。vectorbt 回测报告会在后续里程碑中接入。
+> 当前仓库已完成 M0 项目骨架、M1 数据层、组合/建议层和本机 Web UI 的第一批实现：配置可读取，CLI 与 FastAPI 服务共享运行审计、行情校验、策略、SQLite 成交账本和人工交易建议能力。vectorbt 回测报告与完整建议生成流程会继续接入。
 
 ## 开始使用
 
@@ -11,6 +11,15 @@
 ```bash
 python -m pip install -e ".[data,backtest,test]"
 ```
+
+安装本机 Web UI：
+
+```bash
+python -m pip install -e ".[web,data,backtest]"
+python -m quant.server --host 127.0.0.1 --port 8000
+```
+
+浏览器打开 <http://127.0.0.1:8000/>。Web 服务默认只允许一个下载、回测或建议任务同时运行；成交回录先预览，再确认写入 SQLite。
 
 也可以直接安装当前完整依赖列表：
 
@@ -40,9 +49,31 @@ python -m quant download --provider local --file snapshot.csv \
   --config configs/universe.yaml --start 2026-01-01 --end 2026-10-08
 ```
 
+AkShare 聚合的是公开数据接口，单个上游会限流或断连，因此下载会按 `eastmoney` → `sina` → `tencent` 依次尝试，并在运行状态里记录实际生效的端点（`endpoints` 字段）。三个端点都失败时，`status.json` 的 `error` 会包含每个端点的具体报错。
+
 `validate-data` 会在运行目录写入 `data_quality.json`；缺失、重复或异常 OHLCV 会标记为 `BLOCKED`。`backtest` 等命令的回测业务将在后续阶段填充；在实现完成前，运行状态会标记为 `INITIALIZED`，不会生成可执行交易建议。
 
 `reconcile` 会幂等导入成交 CSV，并在运行目录保存 `portfolio_snapshot.json`。CSV 至少需要 `trade_id,symbol,side,quantity,price,fee,executed_at` 列。
+
+## 清除历史记录
+
+本地命令默认只预览，不会删除任何内容：
+
+```bash
+python -m quant clear-history
+```
+
+确认后再执行。默认清理运行记录和行情快照，组合数据库需要显式指定：
+
+```bash
+python -m quant clear-history --yes                 # runs + data
+python -m quant clear-history --runs --yes          # 只清理运行记录
+python -m quant clear-history --data --yes          # 只清理行情快照
+python -m quant clear-history --db --yes            # 连成交账本一起删除
+python -m quant clear-history --keep-days 30 --yes  # 保留最近 30 天
+```
+
+Web 端在“维护”页面操作：先看历史占用，勾选范围，输入 `CLEAR` 后点击清除。清理动作会写一条 `clear-history` 运行记录，保留操作审计。
 
 ## 项目目标
 
@@ -198,4 +229,3 @@ python -m quant report --date 2026-10-08
 ## 免责声明
 
 本项目用于个人量化研究、回测和人工交易辅助，不构成投资建议。任何实盘操作都应由使用者独立确认，并在可承受损失的范围内进行。
-

@@ -38,6 +38,7 @@ def create_run(
     *,
     command: str,
     config_paths: list[str] | None = None,
+    params: dict[str, Any] | None = None,
 ) -> RunContext:
     """Create a unique run directory and persist its input manifest."""
 
@@ -52,6 +53,7 @@ def create_run(
         "started_at": started_at.isoformat(),
         "run_date": effective_date.isoformat(),
         "config_paths": config_paths or [],
+        "params": params or {},
         "input_fingerprint": _fingerprint(command, config_paths or []),
     }
     (run_dir / "input_manifest.json").write_text(

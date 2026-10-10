@@ -15,13 +15,24 @@ dependencies = [
 [project.optional-dependencies]
 data = ["akshare>=1.15", "pandas>=2.0", "pyarrow>=14.0"]
 backtest = ["vectorbt>=0.26", "pandas>=2.0"]
+web = [
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.30",
+  "jinja2>=3.1",
+  "python-multipart>=0.0.9",
+  "plotly>=5.0",
+]
 test = ["pytest>=8.0"]
 
 [project.scripts]
 quant = "quant.cli:main"
+quant-server = "quant.server:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+quant = ["templates/*.html", "static/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

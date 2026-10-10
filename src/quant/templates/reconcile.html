@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-heading"><div><p class="eyebrow">EXECUTED FILLS</p><h1>成交回录</h1></div><span class="status status-blocked">需要确认</span></div>
+<section class="panel">
+  <p class="muted">上传 CSV 后先预览。只有确认后才会写入 SQLite；重复 trade_id 会被识别为幂等记录。</p>
+  <form id="reconcile-form"><input type="file" name="file" accept=".csv"><div class="fill-fields"><input name="trade_id" placeholder="trade_id"><input name="symbol" placeholder="symbol"><select name="side"><option value="BUY">BUY</option><option value="SELL">SELL</option></select><input name="quantity" type="number" min="1" placeholder="quantity"><input name="price" type="number" step="0.0001" placeholder="price"><input name="fee" type="number" step="0.0001" value="0" placeholder="fee"><input name="executed_at" placeholder="2026-10-10T09:30:00+08:00"><input name="broker_reference" placeholder="broker reference"><input name="note" placeholder="note"></div><div class="actions"><button class="button" type="submit">预览成交</button><button class="button" id="commit-button" type="button" disabled>确认写入</button></div></form>
+  <pre id="reconcile-result">尚未预览。</pre>
+</section>
+{% endblock %}

@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ title or "zzQuantBridge" }}</title>
+  <link rel="stylesheet" href="/static/app.css?v=4">
+  <script src="/static/htmx.min.js" defer></script>
+  <script>window.quantCsrf={{ csrf_token|tojson }};</script>
+  <script src="/static/app.js?v=4" defer></script>
+  <script src="/static/plotly.min.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/">zzQuantBridge</a>
+    <nav>
+      <a href="/market">行情</a>
+      <a href="/backtest">回测</a>
+      <a href="/portfolio">组合</a>
+      <a href="/suggestions">交易建议</a>
+      <a href="/reconcile">成交回录</a>
+      <a href="/maintenance">维护</a>
+    </nav>
+  </header>
+  <main class="container">
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

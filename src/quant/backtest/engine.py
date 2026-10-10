@@ -42,9 +42,18 @@ def run_signal_backtest(close: Any, entries: Any, exits: Any, config: BacktestCo
         import vectorbt as vbt
     except ImportError as exc:  # pragma: no cover - optional dependency
         raise RuntimeError("vectorbt is required for backtests; install the backtest extra") from exc
+    # numba rejects tz-aware DatetimeIndex and object dtypes. pandas 3 turns
+    # boolean signal frames into object columns after ``shift``/``fillna``, so
+    # rebuild all frames as plain numpy dtypes before they reach vectorbt.
+    close = _plain_frame(close)
+    entries = _plain_frame(entries)
+    exits = _plain_frame(exits)
     if settings.signal_delay:
-        entries = entries.shift(settings.signal_delay).fillna(False)
-        exits = exits.shift(settings.signal_delay).fillna(False)
+        entries = entries.shift(settings.signal_delay)
+        exits = exits.shift(settings.signal_delay)
+    close = _float_frame(close)
+    entries = _bool_frame(entries)
+    exits = _bool_frame(exits)
     portfolio = vbt.Portfolio.from_signals(
         close,
         entries=entries,
@@ -54,8 +63,36 @@ def run_signal_backtest(close: Any, entries: Any, exits: Any, config: BacktestCo
         slippage=settings.slippage,
         freq=settings.freq,
     )
-    stats = portfolio.stats()
+    stats = portfolio.stats(silence_warnings=True)
     metrics = {str(key): value for key, value in stats.items()}
     metrics["total_return"] = portfolio.total_return()
     metrics["max_drawdown"] = portfolio.max_drawdown()
     return BacktestResult(portfolio=portfolio, metrics=metrics)
+
+
+def _plain_frame(frame: Any) -> Any:
+    """Drop timezone information so vectorbt's numba kernels accept the frame."""
+
+    if hasattr(frame, "to_frame") and not hasattr(frame, "columns"):
+        frame = frame.to_frame()
+    index = getattr(frame, "index", None)
+    if index is not None and getattr(index, "tz", None) is not None:
+        frame = frame.copy()
+        frame.index = index.tz_localize(None)
+    return frame
+
+
+def _float_frame(frame: Any) -> Any:
+    import pandas as pd
+
+    return pd.DataFrame(frame.to_numpy(dtype="float64"), index=frame.index, columns=frame.columns)
+
+
+def _bool_frame(frame: Any) -> Any:
+    import pandas as pd
+
+    return pd.DataFrame(
+        frame.to_numpy(dtype=bool, na_value=False),
+        index=frame.index,
+        columns=frame.columns,
+    )

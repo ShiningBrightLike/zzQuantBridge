@@ -1,0 +1,6 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-heading"><div><p class="eyebrow">PORTFOLIO</p><h1>组合</h1></div><a class="button" href="/suggestions">查看建议</a></div>
+<section class="cards"><article class="card"><span class="label">现金</span><strong>{{ snapshot.cash if snapshot else "—" }}</strong></article><article class="card"><span class="label">持仓</span><strong>{{ snapshot.positions|length if snapshot else "—" }}</strong></article><article class="card"><span class="label">已实现盈亏</span><strong>{{ snapshot.realized_pnl if snapshot else "—" }}</strong></article></section>
+<section class="panel"><div class="panel-heading"><h2>持仓</h2><span class="muted">SQLite: {{ db_path }}</span></div>{% if snapshot and snapshot.positions %}<table><thead><tr><th>标的</th><th>数量</th><th>平均成本</th></tr></thead><tbody>{% for symbol, quantity in snapshot.positions.items() %}<tr><td>{{ symbol }}</td><td>{{ quantity }}</td><td>{{ snapshot.average_cost[symbol] }}</td></tr>{% endfor %}</tbody></table>{% else %}<div class="empty">尚未加载组合快照。请先通过成交回录建立组合状态。</div>{% endif %}</section>
+{% endblock %}

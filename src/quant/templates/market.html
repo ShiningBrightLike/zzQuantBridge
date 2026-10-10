@@ -1,0 +1,6 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-heading"><div><p class="eyebrow">MARKET DATA</p><h1>行情</h1></div><span class="status status-blocked">本地快照</span></div>
+<section class="panel"><div id="market-chart" class="chart"></div><p class="muted">{{ message }}</p></section>
+<script>window.addEventListener('load',()=>{const f={{ figure|tojson }}; if(window.Plotly) Plotly.newPlot('market-chart',f.data,f.layout,{responsive:true});});</script>
+{% endblock %}

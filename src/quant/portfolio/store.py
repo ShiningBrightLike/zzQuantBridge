@@ -6,7 +6,6 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 import sqlite3
-from typing import Iterable
 
 from ..domain import ExecutedTrade
 
@@ -110,6 +109,45 @@ class PortfolioStore:
                 (*values, datetime.now(timezone.utc).isoformat()),
             )
             return True
+
+    def append_trades(self, trades: list[ExecutedTrade]) -> int:
+        """Append a batch atomically, preserving idempotency and conflicts."""
+
+        inserted = 0
+        with self._connect() as connection:
+            seen: set[str] = set()
+            for trade in trades:
+                if trade.trade_id in seen:
+                    raise TradeConflictError(f"duplicate trade_id in batch: {trade.trade_id}")
+                seen.add(trade.trade_id)
+                values = (
+                    trade.trade_id,
+                    trade.symbol,
+                    trade.side,
+                    trade.quantity,
+                    trade.price,
+                    trade.fee,
+                    trade.executed_at.isoformat(),
+                    trade.broker_reference,
+                    trade.note,
+                )
+                existing = connection.execute(
+                    "SELECT symbol, side, quantity, price, fee, executed_at, broker_reference, note "
+                    "FROM executed_trades WHERE trade_id = ?",
+                    (trade.trade_id,),
+                ).fetchone()
+                if existing is not None:
+                    if tuple(existing) != values[1:]:
+                        raise TradeConflictError(f"trade_id already exists with different details: {trade.trade_id}")
+                    continue
+                connection.execute(
+                    "INSERT INTO executed_trades "
+                    "(trade_id, symbol, side, quantity, price, fee, executed_at, broker_reference, note, inserted_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (*values, datetime.now(timezone.utc).isoformat()),
+                )
+                inserted += 1
+        return inserted
 
     def trades(self) -> list[ExecutedTrade]:
         with self._connect() as connection:

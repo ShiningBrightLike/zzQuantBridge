@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-heading"><div><p class="eyebrow">RUN DETAIL</p><h1 class="mono">{{ run.run_id }}</h1></div><span id="run-status" class="status status-{{ run.status|lower }}">{{ run.status }}</span></div>
+<section class="panel"><h2>运行状态</h2><pre id="run-payload">{{ run.payload|tojson(indent=2) }}</pre></section>
+<script>
+const runId={{ run.run_id|tojson }};
+const poll=()=>fetch('/api/runs/'+runId).then(r=>r.json()).then(data=>{document.querySelector('#run-status').textContent=data.status; document.querySelector('#run-status').className='status status-'+data.status.toLowerCase(); document.querySelector('#run-payload').textContent=JSON.stringify(data,null,2); if(['QUEUED','RUNNING'].includes(data.status)) setTimeout(poll,2000);});
+if(['QUEUED','RUNNING'].includes({{ run.status|tojson }})) poll();
+</script>
+{% endblock %}

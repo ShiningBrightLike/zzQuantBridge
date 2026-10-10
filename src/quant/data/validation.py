@@ -32,7 +32,17 @@ def normalize_ohlcv(frame: Any) -> Any:
     result["symbol"] = result["symbol"].astype(str).str.strip()
     if result["symbol"].eq("").any():
         raise DataValidationError("symbol must not be empty")
-    result["timestamp"] = pd.to_datetime(result["timestamp"], errors="coerce", utc=True).dt.tz_convert("Asia/Shanghai")
+    try:
+        timestamps = pd.to_datetime(result["timestamp"], errors="coerce")
+    except (TypeError, ValueError):
+        timestamps = pd.to_datetime(result["timestamp"], errors="coerce", utc=True)
+    if getattr(timestamps.dt, "tz", None) is None:
+        # A-share daily bars arrive as plain dates, so read them as local
+        # trading days instead of UTC midnight.
+        timestamps = timestamps.dt.tz_localize("Asia/Shanghai", ambiguous="NaT", nonexistent="NaT")
+    else:
+        timestamps = timestamps.dt.tz_convert("Asia/Shanghai")
+    result["timestamp"] = timestamps
     if result["timestamp"].isna().any():
         raise DataValidationError("timestamp contains invalid values")
     numeric = ["open", "high", "low", "close", "volume"]

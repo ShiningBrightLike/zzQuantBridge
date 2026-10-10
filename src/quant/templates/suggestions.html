@@ -1,0 +1,6 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-heading"><div><p class="eyebrow">MANUAL EXECUTION</p><h1>交易建议</h1></div><span class="status status-{{ risk_status|lower }}">{{ risk_status }}</span></div>
+<section class="panel risk-panel"><h2>风险检查</h2>{% for reason in risk_reasons %}<p>{{ reason }}</p>{% endfor %}</section>
+<section class="panel">{% if suggestions %}<table><thead><tr><th>标的</th><th>动作</th><th>数量</th><th>参考价</th><th>目标权重</th><th>状态</th></tr></thead><tbody>{% for item in suggestions %}<tr><td>{{ item.symbol }}</td><td>{{ item.action }}</td><td>{{ item.quantity }}</td><td>{{ item.reference_price }}</td><td>{{ item.target_weight }}</td><td>{{ item.status }}</td></tr>{% endfor %}</tbody></table>{% else %}<div class="empty">没有可执行建议。系统不会在风险检查完成前生成交易动作。</div>{% endif %}</section>
+{% endblock %}

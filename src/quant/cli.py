@@ -13,6 +13,7 @@ from .config import ConfigError, load_yaml_config
 from .data.archive import ArchiveError
 from .data.providers import DataFetchError
 from .data.validation import DataValidationError
+from .maintenance import MaintenanceError, clear_history, format_bytes, history_summary
 from .runs import configure_run_logging, create_run
 
 
@@ -23,6 +24,7 @@ COMMANDS = (
     "generate-signals",
     "reconcile",
     "report",
+    "clear-history",
 )
 
 
@@ -57,6 +59,14 @@ def build_parser() -> argparse.ArgumentParser:
             subparser.add_argument("--end", help="Last date to download")
             subparser.add_argument("--data-dir", default="data", help="Market data archive directory")
             subparser.add_argument("--adjustment", choices=("", "qfq", "hfq"), default="")
+        if command == "clear-history":
+            subparser.add_argument("--runs", action="store_true", help="Remove run directories")
+            subparser.add_argument("--data", action="store_true", help="Remove market data snapshots")
+            subparser.add_argument("--db", action="store_true", help="Remove the portfolio SQLite database")
+            subparser.add_argument("--keep-days", type=int, default=None, help="Keep history newer than N days")
+            subparser.add_argument("--yes", action="store_true", help="Skip the confirmation prompt")
+            subparser.add_argument("--db-path", default="db/portfolio.sqlite")
+            subparser.add_argument("--data-dir", default="data")
     return parser
 
 
@@ -69,11 +79,62 @@ def _parse_date(value: str | None) -> date | None:
         raise ConfigError(f"Invalid --date, expected YYYY-MM-DD: {value}") from exc
 
 
+def _selection_flags(selection: dict[str, bool]) -> list[str]:
+    flags = []
+    if selection["runs"]:
+        flags.append("--runs")
+    if selection["data"]:
+        flags.append("--data")
+    if selection["database"]:
+        flags.append("--db")
+    return flags
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     context = None
     try:
         run_date = _parse_date(args.run_date)
+        if args.command == "clear-history":
+            selection = {
+                "runs": args.runs or not (args.runs or args.data or args.db),
+                "data": args.data or not (args.runs or args.data or args.db),
+                "database": args.db,
+            }
+            summary = history_summary(runs_dir=args.runs_dir, data_dir=args.data_dir, db_path=args.db_path)
+            total_bytes = sum(
+                section.get("bytes", 0)
+                for key, section in summary.items()
+                if key != "paths" and isinstance(section, dict)
+            )
+            print(
+                f"history: runs={summary['runs']['count']}"
+                f" snapshots={summary['snapshots']['count']}"
+                f" metadata={summary['metadata']['count']}"
+                f" db_files={summary['database']['count']}"
+                f" size={format_bytes(total_bytes)}"
+            )
+            report = clear_history(
+                runs_dir=args.runs_dir,
+                data_dir=args.data_dir,
+                db_path=args.db_path,
+                runs=selection["runs"],
+                data=selection["data"],
+                database=selection["database"],
+                keep_days=args.keep_days,
+                confirm=args.yes,
+                dry_run=not args.yes,
+            )
+            print(json.dumps(report, indent=2, ensure_ascii=False))
+            if not args.yes:
+                flags = " ".join(_selection_flags(selection)) or "--runs --data"
+                print(
+                    f"\npreview only: {report['total']} item(s), {format_bytes(report['bytes_freed'])} would be removed."
+                    f" Re-run with --yes to delete: quant clear-history {flags} --yes"
+                )
+                return 0
+            print(f"\nremoved {report['total']} item(s), freed {format_bytes(report['bytes_freed'])}")
+            return 0
         loaded_configs = {}
         for config_path in args.config:
             loaded_configs[config_path] = load_yaml_config(config_path)
@@ -207,7 +268,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         print(context.run_dir)
         return 0
-    except (ArchiveError, ConfigError, DataFetchError, DataValidationError) as exc:
+    except (ArchiveError, ConfigError, DataFetchError, DataValidationError, MaintenanceError) as exc:
         if context is not None:
             (context.run_dir / "status.json").write_text(
                 json.dumps({"status": "ERROR", "error": str(exc)}, indent=2) + "\n", encoding="utf-8"
