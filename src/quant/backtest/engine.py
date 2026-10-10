@@ -96,3 +96,19 @@ def _bool_frame(frame: Any) -> Any:
         index=frame.index,
         columns=frame.columns,
     )
+
+
+def crossovers(signals: Any) -> Any:
+    """Keep only the bars where a boolean signal turns on.
+
+    pandas turns a shifted boolean frame into ``object`` dtype, and ``~`` on
+    those values yields Python ints (``True`` -> -2, ``False`` -> -1) which are
+    both truthy. That silently disables the filter, so compare plain numpy
+    arrays instead.
+    """
+
+    import pandas as pd
+
+    current = signals.to_numpy(dtype=bool, na_value=False)
+    previous = signals.shift(1).to_numpy(dtype=bool, na_value=False)
+    return pd.DataFrame(current & ~previous, index=signals.index, columns=signals.columns)

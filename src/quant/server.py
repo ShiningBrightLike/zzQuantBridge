@@ -260,7 +260,7 @@ def create_app(
 
     @app.get("/static/{asset_name}")
     def static_asset(asset_name: str) -> FileResponse:
-        allowed = {"app.css": "text/css", "app.js": "application/javascript", "htmx.min.js": "application/javascript"}
+        allowed = {"app.css": "text/css", "app.js": "application/javascript"}
         if asset_name not in allowed:
             raise HTTPException(status_code=404, detail="asset not found")
         path = static_root / asset_name

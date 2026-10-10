@@ -40,7 +40,7 @@ class TradeSuggestion:
     action: TradeAction
     quantity: int
     target_weight: float
-    reference_price: float
+    reference_price: float | None
     max_price: float | None
     min_price: float | None
     risk_flags: list[str] = field(default_factory=list)
@@ -55,8 +55,12 @@ class TradeSuggestion:
             raise ValueError("quantity must not be negative")
         if not math.isfinite(self.target_weight) or not 0.0 <= self.target_weight <= 1.0:
             raise ValueError("target_weight must be between 0 and 1")
-        if not math.isfinite(self.reference_price) or self.reference_price <= 0:
-            raise ValueError("reference_price must be positive")
+        if self.reference_price is not None and (
+            not math.isfinite(self.reference_price) or self.reference_price <= 0
+        ):
+            raise ValueError("reference_price must be positive when provided")
+        if self.status == "PASS" and self.reference_price is None:
+            raise ValueError("a passing suggestion requires a reference_price")
         if self.max_price is not None and (not math.isfinite(self.max_price) or self.max_price <= 0):
             raise ValueError("max_price must be positive")
         if self.min_price is not None and (not math.isfinite(self.min_price) or self.min_price <= 0):

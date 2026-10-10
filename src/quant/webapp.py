@@ -14,7 +14,7 @@ from typing import Any, Callable, Iterable
 
 from .domain import ExecutedTrade
 from .portfolio import PortfolioStore
-from .runs import RunContext, configure_run_logging, create_run
+from .runs import RunContext, configure_run_logging, create_run, write_status
 
 
 RUN_KINDS = {"download", "backtest", "generate-signals"}
@@ -84,10 +84,7 @@ class JobManager:
 
     @staticmethod
     def _write_status(context: RunContext, status: str, payload: dict[str, Any]) -> None:
-        context.run_dir.joinpath("status.json").write_text(
-            json.dumps({"status": status, **payload}, indent=2, ensure_ascii=False) + "\n",
-            encoding="utf-8",
-        )
+        write_status(context.run_dir, status, payload)
 
     def shutdown(self) -> None:
         self._executor.shutdown(wait=False, cancel_futures=True)
@@ -114,7 +111,14 @@ def list_runs(runs_dir: str | Path = "runs", *, limit: int = 20) -> list[RunReco
             )
         except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError):
             continue
-    records.sort(key=lambda item: item.run_dir.stat().st_mtime, reverse=True)
+    def modified(record: RunRecord) -> float:
+        try:
+            return record.run_dir.stat().st_mtime
+        except OSError:
+            # The directory can disappear while a cleanup runs; keep listing.
+            return 0.0
+
+    records.sort(key=modified, reverse=True)
     return records[:limit]
 
 
@@ -184,13 +188,14 @@ def preview_trades(trades: Iterable[ExecutedTrade], db_path: str | Path) -> dict
         "trade_ids": [trade.trade_id for trade in rows],
         "duplicates": duplicates,
         "will_insert": len(rows) - len(duplicates),
+        "initial_cash": store.get_initial_cash(),
     }
 
 
 def commit_trades(trades: Iterable[ExecutedTrade], db_path: str | Path) -> dict[str, Any]:
     store = PortfolioStore(db_path)
     inserted = store.append_trades(list(trades))
-    snapshot = store.snapshot(0.0)
+    snapshot = store.snapshot(store.get_initial_cash() or 0.0)
     return {
         "inserted": inserted,
         "cash": snapshot.cash,

@@ -73,3 +73,16 @@ def configure_run_logging(context: RunContext) -> logging.Logger:
         handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s run_id=%(name)s %(message)s"))
         logger.addHandler(handler)
     return logger
+
+
+def write_status(run_dir: str | Path, status: str, payload: dict[str, Any] | None = None) -> Path:
+    """Write a run status file atomically so pollers never read a torn file."""
+
+    directory = Path(run_dir)
+    directory.mkdir(parents=True, exist_ok=True)
+    target = directory / "status.json"
+    temporary = directory / "status.json.tmp"
+    body = json.dumps({"status": status, **(payload or {})}, indent=2, ensure_ascii=False) + "\n"
+    temporary.write_text(body, encoding="utf-8")
+    temporary.replace(target)
+    return target

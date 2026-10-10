@@ -77,6 +77,39 @@ class PortfolioStore:
                 )
                 """
             )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS portfolio_meta (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
+
+    def set_meta(self, key: str, value: str) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                "INSERT INTO portfolio_meta (key, value, updated_at) VALUES (?, ?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+                (key, value, datetime.now(timezone.utc).isoformat()),
+            )
+
+    def get_meta(self, key: str) -> str | None:
+        with self._connect() as connection:
+            row = connection.execute("SELECT value FROM portfolio_meta WHERE key = ?", (key,)).fetchone()
+        return None if row is None else str(row["value"])
+
+    def set_initial_cash(self, value: float) -> None:
+        if value < 0:
+            raise ValueError("initial_cash must not be negative")
+        self.set_meta("initial_cash", repr(float(value)))
+
+    def get_initial_cash(self) -> float | None:
+        raw = self.get_meta("initial_cash")
+        if raw is None:
+            return None
+        return float(raw)
 
     def append_trade(self, trade: ExecutedTrade) -> bool:
         """Append a fill; return False for an identical already-seen fill."""

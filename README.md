@@ -51,7 +51,16 @@ python -m quant download --provider local --file snapshot.csv \
 
 AkShare 聚合的是公开数据接口，单个上游会限流或断连，因此下载会按 `eastmoney` → `sina` → `tencent` 依次尝试，并在运行状态里记录实际生效的端点（`endpoints` 字段）。三个端点都失败时，`status.json` 的 `error` 会包含每个端点的具体报错。
 
-`validate-data` 会在运行目录写入 `data_quality.json`；缺失、重复或异常 OHLCV 会标记为 `BLOCKED`。`backtest` 等命令的回测业务将在后续阶段填充；在实现完成前，运行状态会标记为 `INITIALIZED`，不会生成可执行交易建议。
+`validate-data` 会在运行目录写入 `data_quality.json`；缺失、重复或异常 OHLCV 会标记为 `BLOCKED`。预期交易日历取快照中所有标的的交易日并集，因此某个标的缺一根 bar 会被识别为数据缺口。
+
+`backtest` 与 `generate-signals` 使用与 Web UI 相同的实现，运行后会写入：
+
+- `backtest_metrics.json`、`equity_curve.csv`、`trades.csv`
+- `sensitivity.json`：成本倍数、信号延迟、滚动窗口三组敏感性
+- `signals.csv`、`orders.csv`、`risk_report.json`、`portfolio_snapshot.json`
+- `report.html`：按“风险 → 动作 → 原因”组织的运行报告
+
+生成建议前会执行强制风险检查（单标的权重、行业集中度、总仓位、现金缓冲、单日换手、最小成交金额、价格有效性和数据新鲜度）。任一检查失败时，建议状态为 `BLOCKED`，不会放行。
 
 `reconcile` 会幂等导入成交 CSV，并在运行目录保存 `portfolio_snapshot.json`。CSV 至少需要 `trade_id,symbol,side,quantity,price,fee,executed_at` 列。
 

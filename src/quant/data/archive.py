@@ -45,10 +45,10 @@ def archive_snapshot(
     processed_dir = root_path / "processed" / snapshot_id
     metadata_dir = root_path / "metadata"
     files: list[dict[str, str]] = []
-    for (symbol, trading_date), group in normalized.groupby(
-        [normalized["symbol"], normalized["timestamp"].dt.date], sort=True
-    ):
-        relative = Path(f"date={trading_date.isoformat()}") / f"symbol={symbol}" / "bars.parquet"
+    for symbol, group in normalized.groupby("symbol", sort=True):
+        # One Parquet file per symbol per snapshot; per-day files explode into
+        # hundreds of thousands of tiny files for a realistic universe.
+        relative = Path(f"symbol={symbol}") / "bars.parquet"
         processed_path = processed_dir / relative
         processed_path.parent.mkdir(parents=True, exist_ok=True)
         try:
