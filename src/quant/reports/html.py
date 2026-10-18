@@ -59,9 +59,17 @@ def write_run_report(run_dir: str | Path, *, title: str | None = None) -> Path:
     sensitivity = _read_json(directory / "sensitivity.json")
     snapshot = _read_json(directory / "portfolio_snapshot.json")
     data_manifest = _read_json(directory / "data_manifest.json")
+    data_quality = _read_json(directory / "data_quality.json")
     orders = _read_csv(directory / "orders.csv")
     signals = _read_csv(directory / "signals.csv")
     trade_log = _read_csv(directory / "trades.csv")
+    selections = _read_csv(directory / "selections.csv")
+    factor_weights = _read_csv(directory / "factor_weights.csv")
+    if not selections:
+        selections = _read_csv(directory / "backtest_selections.csv")
+    if not factor_weights:
+        factor_weights = _read_csv(directory / "backtest_factor_weights.csv")
+    model_metadata = _read_json(directory / "model_metadata.json")
 
     run_id = str(manifest.get("run_id", directory.name))
     command = str(manifest.get("command", status.get("command", "")))
@@ -72,6 +80,8 @@ def write_run_report(run_dir: str | Path, *, title: str | None = None) -> Path:
     for symbol, flags in (risk.get("symbol_flags") or {}).items():
         for flag in flags:
             risk_rows.append({"check": f"{symbol}: {flag}", "result": "BLOCKED"})
+    for error in data_quality.get("errors", []):
+        risk_rows.append({"check": f"数据质量: {error}", "result": "BLOCKED"})
     if not risk_rows:
         risk_rows = [{"check": "所有风险检查通过", "result": risk.get("status", run_status)}]
 
@@ -88,6 +98,10 @@ def write_run_report(run_dir: str | Path, *, title: str | None = None) -> Path:
         {"item": str(key), "value": json.dumps(value, ensure_ascii=False)}
         for key, value in data_manifest.items()
     ]
+    quality_rows = [
+        {"item": str(key), "value": json.dumps(value, ensure_ascii=False)}
+        for key, value in data_quality.items()
+    ]
 
     missing = [
         name
@@ -100,6 +114,31 @@ def write_run_report(run_dir: str | Path, *, title: str | None = None) -> Path:
         )
         if not path.exists()
     ]
+
+    multifactor_sections = ""
+    if selections or factor_weights or model_metadata:
+        metadata_rows = [
+            {"item": str(key), "value": json.dumps(value, ensure_ascii=False)}
+            for key, value in model_metadata.items()
+        ]
+        multifactor_sections = (
+            "<section><h2>4. 多因子选股</h2>"
+            + _table(selections, [
+                "symbol", "name", "rank", "score", "valid_factor_count",
+                "target_weight", "model_version",
+            ])
+            + "<h2>5. 因子权重</h2>"
+            + _table(
+                factor_weights,
+                [
+                    "factor", "weight", "direction", "used", "ic_mean", "icir",
+                    "ic_win_rate", "ic_days", "sign_stable",
+                ],
+            )
+            + "<h2>模型元数据</h2>"
+            + _table(metadata_rows, ["item", "value"])
+            + "</section>"
+        )
 
     body = f"""<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8">
@@ -122,11 +161,13 @@ section{{background:#131b2f;border:1px solid #283654;border-radius:12px;margin-t
 <section><h2>1. 风险</h2>{_table(risk_rows, ['check', 'result'])}</section>
 <section><h2>2. 动作</h2>{_table(orders, ['symbol', 'action', 'quantity', 'target_weight', 'reference_price', 'status', 'risk_flags', 'reason'])}</section>
 <section><h2>3. 原因</h2>{_table(signals, ['symbol', 'timestamp', 'target_weight', 'reason', 'model_version'])}</section>
-<section><h2>4. 回测指标</h2>{_table(metric_rows, ['metric', 'value'])}</section>
-<section><h2>5. 敏感性分析</h2>{_table(sensitivity_rows, ['scenario', 'value'])}</section>
-<section><h2>6. 组合快照</h2>{_table(portfolio_rows, ['item', 'value'])}</section>
-<section><h2>7. 输入数据</h2>{_table(data_rows, ['item', 'value'])}</section>
-<section><h2>8. 逐笔交易</h2>{_table(trade_log, list(trade_log[0].keys()) if trade_log else ['trade'])}</section>
+<section><h2>3.1 数据质量</h2>{_table(quality_rows, ['item', 'value'])}</section>
+{multifactor_sections}
+<section><h2>6. 回测指标</h2>{_table(metric_rows, ['metric', 'value'])}</section>
+<section><h2>7. 敏感性分析</h2>{_table(sensitivity_rows, ['scenario', 'value'])}</section>
+<section><h2>8. 组合快照</h2>{_table(portfolio_rows, ['item', 'value'])}</section>
+<section><h2>9. 输入数据</h2>{_table(data_rows, ['item', 'value'])}</section>
+<section><h2>10. 逐笔交易</h2>{_table(trade_log, list(trade_log[0].keys()) if trade_log else ['trade'])}</section>
 <p class="muted">本次运行未产出：{html.escape(', '.join(missing)) if missing else '无'}</p>
 </main></body></html>
 """

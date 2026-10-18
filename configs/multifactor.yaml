@@ -1,0 +1,57 @@
+name: multifactor_selection
+strategy: multifactor
+model_version: multifactor-v1
+execution_prices: true
+
+universe:
+  mode: all_a
+  max_symbols: 800
+  candidate_pool_size: 0
+  min_history_days: 120
+  min_avg_dollar_volume: 50000000
+  exclude_st: true
+  exclude_bj: true
+  include_chi_next: true
+  include_star: true
+
+factors:
+  momentum_windows: [20, 60, 120]
+  volatility_windows: [20, 60]
+  reversal_window: 5
+  liquidity_window: 20
+  long_liquidity_window: 60
+  rsi_window: 14
+  high_window: 252
+
+training:
+  lookback_days: 504
+  label_horizon: 20
+  min_cross_section: 30
+  min_ic_days: 120
+  min_abs_ic: 0.02
+  min_abs_icir: 0.10
+  weight_alpha: 0.5
+  max_factors: 12
+
+quality:
+  max_missing_days: 20
+  max_missing_ratio: 0.02
+
+selection:
+  top_n: 20
+  hold_buffer: 30
+  max_single_weight: 0.05
+  cash_buffer: 0.10
+  min_score: 0.0
+  rebalance_days: 20
+  lot_size: 100
+  affordability_filter: true
+
+backtest:
+  init_cash: 100000
+  fees: 0.0003
+  slippage: 0.0005
+  signal_delay: 1
+  min_order_value: 0
+  min_oos_days: 504
+  backtest_start: null

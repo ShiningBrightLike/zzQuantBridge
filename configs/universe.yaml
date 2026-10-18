@@ -1,6 +1,18 @@
-symbols:
-  - "600000"
-  - "000001"
 market: china_a_share
 asset_type: equity
 timeframe: 1d
+mode: config
+symbols:
+  - "600000"
+  - "000001"
+names:
+  "600000": "浦发银行"
+  "000001": "平安银行"
+max_symbols: 800
+candidate_pool_size: 0
+min_history_days: 120
+min_avg_dollar_volume: 50000000
+exclude_st: true
+exclude_bj: true
+include_chi_next: true
+include_star: true

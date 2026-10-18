@@ -1,7 +1,7 @@
 import pytest
 
 fastapi = pytest.importorskip("fastapi")
-pytest.importorskip("httpx2")
+pytest.importorskip("httpx")
 from fastapi.testclient import TestClient
 
 from quant.server import create_app
@@ -22,6 +22,16 @@ def test_run_trigger_requires_csrf_token(tmp_path):
     with TestClient(app) as client:
         response = client.post("/api/runs/backtest")
         assert response.status_code == 403
+
+
+def test_selection_page_renders_empty_state(tmp_path):
+    app = create_app(runs_dir=tmp_path / "runs", db_path=tmp_path / "portfolio.sqlite")
+
+    with TestClient(app) as client:
+        response = client.get("/selection")
+        assert response.status_code == 200
+        assert "多因子选股" in response.text
+        assert "还没有多因子选股结果" in response.text
 
 
 def test_history_clear_needs_csrf_and_confirm_token(tmp_path):

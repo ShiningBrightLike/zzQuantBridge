@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
 
-from quant.cli import main
+from quant.cli import build_parser, main
 
 
 def _write_fixture(path: Path, symbol: str, days: int = 90) -> Path:
@@ -76,3 +76,30 @@ def test_report_command_needs_an_existing_run(tmp_path, capsys):
 
     assert code == 2
     assert "no run available" in capsys.readouterr().err
+
+
+def test_select_stocks_cli_exposes_multifactor_overrides():
+    args = build_parser().parse_args(
+        [
+            "select-stocks",
+            "--strategy",
+            "multifactor",
+            "--top-n",
+            "12",
+            "--label-horizon",
+            "20",
+            "--universe-mode",
+            "all_a",
+            "--max-symbols",
+            "300",
+            "--candidate-pool-size",
+            "600",
+        ]
+    )
+
+    assert args.command == "select-stocks"
+    assert args.strategy == "multifactor"
+    assert args.top_n == 12
+    assert args.label_horizon == 20
+    assert args.universe_mode == "all_a"
+    assert args.candidate_pool_size == 600

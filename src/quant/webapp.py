@@ -17,7 +17,7 @@ from .portfolio import PortfolioStore
 from .runs import RunContext, configure_run_logging, create_run, write_status
 
 
-RUN_KINDS = {"download", "backtest", "generate-signals"}
+RUN_KINDS = {"download", "backtest", "generate-signals", "select-stocks"}
 
 
 class JobConflictError(RuntimeError):
@@ -42,13 +42,29 @@ class JobManager:
         self._lock = threading.Lock()
         self._active: Future[None] | None = None
         self._active_run_id: str | None = None
+        self._active_run_dir: Path | None = None
 
     @property
     def active_run_id(self) -> str | None:
         with self._lock:
-            if self._active is None or self._active.done():
+            if self._active is None or self._active.done() or self._active_status() in {
+                "PASS",
+                "BLOCKED",
+                "ERROR",
+            }:
                 return None
             return self._active_run_id
+
+    def _active_status(self) -> str | None:
+        if self._active_run_dir is None:
+            return None
+        status_path = self._active_run_dir / "status.json"
+        if not status_path.is_file():
+            return None
+        try:
+            return str(json.loads(status_path.read_text(encoding="utf-8")).get("status"))
+        except (OSError, ValueError):
+            return None
 
     def submit(
         self,
@@ -62,12 +78,14 @@ class JobManager:
             raise ValueError(f"unsupported run kind: {kind}")
         with self._lock:
             if self._active is not None and not self._active.done():
-                raise JobConflictError(f"a job is already running: {self._active_run_id}")
+                if self._active_status() not in {"PASS", "BLOCKED", "ERROR"}:
+                    raise JobConflictError(f"a job is already running: {self._active_run_id}")
             context = create_run(self.runs_dir, command=kind, config_paths=config_paths, params=params)
             self._write_status(context, "QUEUED", {"command": kind})
             future = self._executor.submit(self._run, context, kind, task)
             self._active = future
             self._active_run_id = context.run_id
+            self._active_run_dir = context.run_dir
             return context
 
     def _run(self, context: RunContext, kind: str, task: Callable[[RunContext], dict[str, Any] | None]) -> None:
@@ -81,6 +99,15 @@ class JobManager:
         except Exception as exc:  # pragma: no cover - exercised by integration failures
             self._write_status(context, "ERROR", {"error": str(exc), "error_type": type(exc).__name__})
             logger.exception("job failed")
+        finally:
+            # The task has already written its terminal status; release the
+            # single-job slot before the worker thread returns so a poller that
+            # observed PASS/BLOCKED can immediately submit the next step.
+            with self._lock:
+                if self._active_run_id == context.run_id:
+                    self._active_run_id = None
+                    self._active = None
+                    self._active_run_dir = None
 
     @staticmethod
     def _write_status(context: RunContext, status: str, payload: dict[str, Any]) -> None:

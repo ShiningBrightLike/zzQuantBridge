@@ -63,10 +63,40 @@ def run_signal_backtest(close: Any, entries: Any, exits: Any, config: BacktestCo
         slippage=settings.slippage,
         freq=settings.freq,
     )
-    stats = portfolio.stats(silence_warnings=True)
-    metrics = {str(key): value for key, value in stats.items()}
-    metrics["total_return"] = portfolio.total_return()
-    metrics["max_drawdown"] = portfolio.max_drawdown()
+    # vectorbt 0.27's aggregate ``stats()`` mutates internal NumPy arrays that
+    # newer NumPy versions expose as read-only. Compute the small set of
+    # portfolio-level metrics we actually persist instead of relying on that
+    # fragile aggregation path.
+    def scalar(value: Any) -> float:
+        if hasattr(value, "mean"):
+            return float(value.mean())
+        return float(value)
+
+    total_return = scalar(portfolio.total_return())
+    drawdown = scalar(portfolio.max_drawdown())
+    import numpy as np
+
+    returns = np.asarray(portfolio.returns(), dtype="float64").ravel()
+    returns = returns[np.isfinite(returns)]
+    periods = max(1, int(returns.size))
+    mean_return = float(returns.mean()) if returns.size else 0.0
+    dispersion = float(returns.std(ddof=0)) if returns.size else 0.0
+    volatility = dispersion * (252**0.5)
+    sharpe = mean_return / dispersion * (252**0.5) if dispersion > 0 else 0.0
+    annual_return = (
+        float((1.0 + total_return) ** (252.0 / periods) - 1.0)
+        if total_return > -1.0
+        else -1.0
+    )
+    trades = portfolio.trades.records_readable
+    metrics = {
+        "total_return": total_return,
+        "annual_return": annual_return,
+        "annual_volatility": volatility,
+        "sharpe_ratio": sharpe,
+        "max_drawdown": drawdown,
+        "trade_count": int(len(trades)) if trades is not None else 0,
+    }
     return BacktestResult(portfolio=portfolio, metrics=metrics)
 
 
@@ -85,14 +115,16 @@ def _plain_frame(frame: Any) -> Any:
 def _float_frame(frame: Any) -> Any:
     import pandas as pd
 
-    return pd.DataFrame(frame.to_numpy(dtype="float64"), index=frame.index, columns=frame.columns)
+    values = frame.to_numpy(dtype="float64", copy=True)
+    return pd.DataFrame(values.copy(), index=frame.index, columns=frame.columns)
 
 
 def _bool_frame(frame: Any) -> Any:
     import pandas as pd
 
+    values = frame.to_numpy(dtype=bool, na_value=False, copy=True)
     return pd.DataFrame(
-        frame.to_numpy(dtype=bool, na_value=False),
+        values.copy(),
         index=frame.index,
         columns=frame.columns,
     )

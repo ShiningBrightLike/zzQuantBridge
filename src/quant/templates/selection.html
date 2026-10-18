@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-heading">
+  <div><p class="eyebrow">CROSS-SECTIONAL RESEARCH</p><h1>多因子选股</h1></div>
+  <span class="status status-{{ status|lower }}">{{ status }}</span>
+</div>
+<section class="panel risk-panel">
+  <h2>模型状态</h2>
+  {% for reason in reasons %}<p>{{ reason }}</p>{% endfor %}
+  {% if metadata.lookback_start %}<p class="muted">训练窗口：{{ metadata.lookback_start }} → {{ metadata.trained_until }}</p>{% endif %}
+  {% if metadata.fallback_used %}<p class="muted">严格 IC/ICIR 阈值未满足，本次使用了宽松因子回退；请结合回测结果审阅。</p>{% endif %}
+</section>
+<section class="panel">
+  <div class="panel-heading"><h2>入选标的</h2><span class="muted">综合得分越高，排名越靠前</span></div>
+  {% if selections %}
+  <table>
+    <thead><tr><th>排名</th><th>代码</th><th>名称</th><th>得分</th><th>目标权重</th><th>有效因子</th><th>模型</th></tr></thead>
+    <tbody>
+    {% for item in selections %}
+      <tr><td>{{ item.rank }}</td><td class="mono">{{ item.symbol }}</td><td>{{ item.name }}</td><td>{{ item.score }}</td><td>{{ item.target_weight }}</td><td>{{ item.valid_factor_count }}</td><td class="mono">{{ item.model_version }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty">还没有多因子选股结果。先在首页点击“多因子选股”，或运行 <code>python -m quant select-stocks</code>。</div>
+  {% endif %}
+</section>
+{% endblock %}

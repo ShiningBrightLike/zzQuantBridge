@@ -29,12 +29,14 @@ COMMANDS = (
     "validate-data",
     "backtest",
     "generate-signals",
+    "select-stocks",
     "reconcile",
     "report",
     "clear-history",
 )
-TASK_COMMANDS = ("download", "backtest", "generate-signals")
+TASK_COMMANDS = ("download", "backtest", "generate-signals", "select-stocks")
 STRATEGY_KEYS = (
+    "strategy",
     "fast_window",
     "slow_window",
     "max_positions",
@@ -53,6 +55,19 @@ STRATEGY_KEYS = (
     "min_order_value",
     "industries",
     "industry_limits",
+    "execution_prices",
+    "top_n",
+    "hold_buffer",
+    "max_single_weight",
+    "cash_buffer",
+    "rebalance_days",
+    "label_horizon",
+    "lookback_days",
+    "universe",
+    "factors",
+    "training",
+    "selection",
+    "backtest",
 )
 
 
@@ -80,12 +95,38 @@ def build_parser() -> argparse.ArgumentParser:
             subparser.add_argument("--start", help="First date to download")
             subparser.add_argument("--end", help="Last date to download")
             subparser.add_argument("--adjustment", choices=("", "qfq", "hfq"), default="")
+            subparser.add_argument("--universe-mode", choices=("config", "all_a"), default=None)
+            subparser.add_argument("--max-symbols", type=int, default=None)
+            subparser.add_argument("--candidate-pool-size", type=int, default=None)
+            subparser.add_argument(
+                "--execution-prices",
+                action=argparse.BooleanOptionalAction,
+                default=None,
+                help="Fetch recent unadjusted closes for manual execution",
+            )
         if command == "validate-data":
             subparser.add_argument("--file", required=True, help="CSV or Parquet OHLCV snapshot")
             subparser.add_argument("--symbols", nargs="+", default=[], help="Symbols to validate")
             subparser.add_argument("--start", default="1900-01-01", help="First date to include")
             subparser.add_argument("--end", default="2100-01-01", help="Last date to include")
         if command == "generate-signals":
+            subparser.add_argument("--initial-cash", type=float, default=None)
+        if command in {"backtest", "generate-signals", "select-stocks"}:
+            subparser.add_argument(
+                "--strategy",
+                choices=("moving_average", "multifactor"),
+                default=None,
+                help="Strategy to run; defaults to the config name or strategy.yaml",
+            )
+            subparser.add_argument("--top-n", type=int, default=None)
+            subparser.add_argument("--hold-buffer", type=int, default=None)
+            subparser.add_argument("--backtest-start", default=None, help="First multifactor rebalance date")
+            subparser.add_argument("--label-horizon", type=int, default=None)
+            subparser.add_argument("--lookback-days", type=int, default=None)
+            subparser.add_argument("--universe-mode", choices=("config", "all_a"), default=None)
+            subparser.add_argument("--max-symbols", type=int, default=None)
+            subparser.add_argument("--candidate-pool-size", type=int, default=None)
+        if command == "select-stocks":
             subparser.add_argument("--initial-cash", type=float, default=None)
         if command == "reconcile":
             subparser.add_argument("--file", required=True, help="CSV file containing executed fills")
@@ -131,15 +172,52 @@ def _task_params(args: argparse.Namespace) -> dict[str, Any]:
     """Merge CLI flags with any strategy/risk config files into one parameter set."""
 
     params: dict[str, Any] = {}
-    for key in ("symbols", "start", "end", "provider", "file", "adjustment", "initial_cash"):
+    for key in (
+        "symbols",
+        "start",
+        "end",
+        "provider",
+        "file",
+        "adjustment",
+        "initial_cash",
+        "strategy",
+        "top_n",
+        "hold_buffer",
+        "backtest_start",
+        "label_horizon",
+        "lookback_days",
+        "max_symbols",
+        "candidate_pool_size",
+        "universe_mode",
+        "execution_prices",
+    ):
         value = getattr(args, key, None)
         if value not in (None, "", []):
             params[key] = value
+    merged_config: dict[str, Any] = {}
     for config_path in getattr(args, "config", []) or []:
         payload = load_yaml_config(config_path)
+        merged_config.update(payload)
         for key in STRATEGY_KEYS:
             if key in payload:
                 params[key] = payload[key]
+    if merged_config:
+        params["config_payload"] = merged_config
+    universe_overrides: dict[str, Any] = {}
+    if params.get("universe_mode"):
+        universe_overrides["mode"] = params.pop("universe_mode")
+    if params.get("max_symbols") is not None:
+        universe_overrides["max_symbols"] = params.pop("max_symbols")
+    if params.get("candidate_pool_size") is not None:
+        universe_overrides["candidate_pool_size"] = params.pop("candidate_pool_size")
+    if universe_overrides:
+        params["universe"] = {**dict(params.get("universe") or {}), **universe_overrides}
+    training_overrides: dict[str, Any] = {}
+    for key in ("label_horizon", "lookback_days"):
+        if params.get(key) is not None:
+            training_overrides[key] = params.pop(key)
+    if training_overrides:
+        params["training"] = {**dict(params.get("training") or {}), **training_overrides}
     return params
 
 

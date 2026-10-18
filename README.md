@@ -2,7 +2,7 @@
 
 面向个人研究与交易的 **vectorbt + 人工执行** 量化系统。项目自动获取和整理行情数据，运行策略与回测，维护模拟或真实组合状态，并生成可供人工确认的交易建议；实际下单由人在证券公司交易系统中完成，成交结果再回录系统。
 
-> 当前仓库已完成 M0 项目骨架、M1 数据层、组合/建议层和本机 Web UI 的第一批实现：配置可读取，CLI 与 FastAPI 服务共享运行审计、行情校验、策略、SQLite 成交账本和人工交易建议能力。vectorbt 回测报告与完整建议生成流程会继续接入。
+> 当前仓库已完成 M0 项目骨架、M1 数据层、组合/建议层和本机 Web UI 的第一批实现：配置可读取，CLI 与 FastAPI 服务共享运行审计、行情校验、策略、SQLite 成交账本和人工交易建议能力。现已加入可滚动训练的多因子选股、横截面回测和 Web 查看页面。
 
 ## 开始使用
 
@@ -63,6 +63,40 @@ AkShare 聚合的是公开数据接口，单个上游会限流或断连，因此
 生成建议前会执行强制风险检查（单标的权重、行业集中度、总仓位、现金缓冲、单日换手、最小成交金额、价格有效性和数据新鲜度）。任一检查失败时，建议状态为 `BLOCKED`，不会放行。
 
 `reconcile` 会幂等导入成交 CSV，并在运行目录保存 `portfolio_snapshot.json`。CSV 至少需要 `trade_id,symbol,side,quantity,price,fee,executed_at` 列。
+
+## 多因子选股
+
+新增的 `select-stocks` 命令从大范围 A 股股票池中计算量价因子，使用滚动 IC/ICIR 权重生成横截面综合得分，并按 Top-N 结果输出目标仓位和样本外回测。默认股票池会排除 ST、退市、北交所、停牌和低流动性股票：先取当前成交额前约 1600 只作为候选，再按 60 日平均成交额保留约 800 只。筛选规则在 `configs/multifactor.yaml` 中配置；`candidate_pool_size: 0` 表示候选池为最终池的 2 倍，显式调大可以覆盖更多 A 股。
+
+首次使用需要准备至少约 5 年的日线数据：
+
+```bash
+python -m quant download \
+  --config configs/multifactor.yaml \
+  --adjustment qfq \
+  --start 2021-10-01 \
+  --end 2026-10-18
+```
+
+因子研究建议使用前复权快照。下载任务默认额外获取最近 10 个交易日的未复权收盘价并保存为 `execution_close`，建议层优先使用该列；如果没有未复权价格，生成建议会因执行价格口径不明确而阻断。默认 `top_n=20`、初始资金 10 万时，高价股可能无法买入一整手，系统会在 `model_metadata.json` 中标记 `selection_limited`；可提高初始资金、减少 `top_n` 或调整 `selection.lot_size` 预算。
+
+然后运行选股、回测和建议：
+
+```bash
+python -m quant select-stocks --config configs/multifactor.yaml
+python -m quant backtest --config configs/multifactor.yaml
+python -m quant generate-signals --config configs/multifactor.yaml
+```
+
+Web 首页的“多因子选股”按钮和 `/selection` 页面也可以触发和查看最新结果。选股运行会写入：
+
+- `factor_snapshot.csv`、`factor_weights.csv`、`selections.csv`
+- `signals.csv`、`universe.csv`、`model_metadata.json`
+- `backtest_metrics.json`、`equity_curve.csv`、`trades.csv`、`sensitivity.json`
+- `data_quality.json`、`skipped_rebalances.csv`（如有跳过调仓）
+- `report.html`
+
+模型不会直接下单。训练只使用已经实现的前瞻收益，调仓日之后的数据不会参与当日得分；详细定义和限制见 [多因子模型说明](docs/multifactor-model.md)。
 
 ## 清除历史记录
 
@@ -133,7 +167,7 @@ Web 端在“维护”页面操作：先看历史占用，勾选范围，输入 
 | --- | --- | --- |
 | Python 环境 | Python 3.11 + uv/Poetry | 固定依赖、复现运行环境 |
 | 数据处理 | pandas，必要时引入 polars | 清洗行情和计算特征 |
-| 回测 | vectorbt | 信号扫描、成本分析和组合绩效 |
+| 回测 | vectorbt；多因子使用确定性目标权重模拟 | 信号扫描、成本分析和组合绩效 |
 | 存储 | Parquet + DuckDB；SQLite | 行情/特征归档；组合和成交记录 |
 | 配置 | YAML | 标的池、策略、成本和风险参数 |
 | 报告 | Jinja2 + HTML，CSV 兜底 | 人工查看、分享和存档 |

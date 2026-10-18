@@ -19,7 +19,7 @@ from .webapp import (
     parse_fill_rows,
     preview_trades,
 )
-from .tasks import build_task, equity_figure, latest_orders, load_snapshot, market_figure
+from .tasks import build_task, equity_figure, latest_orders, latest_selections, load_snapshot, market_figure
 from .maintenance import CONFIRM_TOKEN, MaintenanceError, clear_history, format_mb, history_summary
 
 
@@ -128,6 +128,18 @@ def create_app(
     def suggestions(request: Request) -> HTMLResponse:
         rows, risk_status, risk_reasons = latest_orders(runs_dir)
         return page_response("suggestions.html", request, suggestions=rows, risk_status=risk_status, risk_reasons=risk_reasons)
+
+    @app.get("/selection", response_class=HTMLResponse)
+    def selection(request: Request) -> HTMLResponse:
+        rows, status, reasons, metadata = latest_selections(runs_dir)
+        return page_response(
+            "selection.html",
+            request,
+            selections=rows,
+            status=status,
+            reasons=reasons,
+            metadata=metadata,
+        )
 
     @app.get("/runs/{run_id}", response_class=HTMLResponse)
     def run_detail(run_id: str, request: Request) -> HTMLResponse:
