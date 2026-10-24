@@ -5,6 +5,7 @@ execution_prices: true
 
 universe:
   mode: all_a
+  auto_download: true
   max_symbols: 800
   candidate_pool_size: 0
   min_history_days: 120
@@ -27,7 +28,7 @@ training:
   lookback_days: 504
   label_horizon: 20
   min_cross_section: 30
-  min_ic_days: 120
+  min_ic_days: 60
   min_abs_ic: 0.02
   min_abs_icir: 0.10
   weight_alpha: 0.5
@@ -36,9 +37,10 @@ training:
 quality:
   max_missing_days: 20
   max_missing_ratio: 0.02
+  excess_gap_policy: exclude
 
 selection:
-  top_n: 20
+  top_n: 10
   hold_buffer: 30
   max_single_weight: 0.05
   cash_buffer: 0.10

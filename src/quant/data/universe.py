@@ -15,6 +15,7 @@ class UniverseConfig:
     """The small, explicit set of universe filters used by the first model."""
 
     mode: str = "config"
+    auto_download: bool = True
     max_symbols: int = 800
     candidate_pool_size: int = 0
     min_history_days: int = 120
@@ -47,6 +48,7 @@ def load_universe_config(configs_dir: str | Path, overrides: Mapping[str, Any] |
             payload[key] = value
     allowed = {
         "mode",
+        "auto_download",
         "max_symbols",
         "candidate_pool_size",
         "min_history_days",

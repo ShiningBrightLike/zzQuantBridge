@@ -76,6 +76,7 @@ class MultifactorStrategyConfig:
             key: universe[key]
             for key in (
                 "mode",
+                "auto_download",
                 "max_symbols",
                 "candidate_pool_size",
                 "min_history_days",

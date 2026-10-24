@@ -73,6 +73,8 @@ def archive_snapshot(
         "request": request,
         "adjustment": adjustment,
         "created_at": datetime.now(timezone.utc).isoformat(),
+        "data_as_of": normalized["timestamp"].max().date().isoformat(),
+        "symbol_count": int(normalized["symbol"].nunique()),
         "row_count": int(len(normalized)),
         "files": files,
     }

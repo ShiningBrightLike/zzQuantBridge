@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import date, datetime
 import hashlib
 import json
 import logging
 from pathlib import Path
+import re
 from uuid import uuid4
 from typing import Any
+from zoneinfo import ZoneInfo
 
 
 @dataclass(frozen=True)
@@ -42,9 +44,10 @@ def create_run(
 ) -> RunContext:
     """Create a unique run directory and persist its input manifest."""
 
-    started_at = datetime.now(timezone.utc)
+    started_at = datetime.now(ZoneInfo("Asia/Shanghai"))
     effective_date = run_date or started_at.date()
-    run_id = f"{started_at.strftime('%H%M%S')}-{uuid4().hex[:8]}"
+    command_slug = re.sub(r"[^a-z0-9]+", "-", command.lower()).strip("-") or "run"
+    run_id = f"{started_at:%Y%m%d-%H%M%S}-{command_slug}-{uuid4().hex[:6]}"
     run_dir = Path(runs_dir) / effective_date.isoformat() / run_id
     run_dir.mkdir(parents=True, exist_ok=False)
     manifest: dict[str, Any] = {

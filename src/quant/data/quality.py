@@ -15,6 +15,8 @@ class QualityReport:
     row_count: int
     errors: tuple[str, ...] = field(default_factory=tuple)
     warnings: tuple[str, ...] = field(default_factory=tuple)
+    excluded_symbols: tuple[str, ...] = field(default_factory=tuple)
+    exclusion_reasons: tuple[str, ...] = field(default_factory=tuple)
 
     @property
     def blocked(self) -> bool:
@@ -56,15 +58,17 @@ def validate_research_snapshot(
     *,
     max_missing_days: int = 20,
     max_missing_ratio: float = 0.02,
+    excess_gap_policy: str = "block",
     halted: Iterable[tuple[str, date]] = (),
 ) -> QualityReport:
     """Validate a multi-symbol research snapshot without rejecting normal halts.
 
     Gaps are measured from each symbol's first observed bar to its last
     observed bar, so pre-listing dates are not treated as missing history.
-    Small gaps are warnings; gaps above either threshold block the run. Callers
-    can declare known halts through ``halted`` when stricter accounting is
-    required.
+    Small gaps are warnings. Gaps above either threshold can block the run or
+    exclude only the affected symbol, depending on ``excess_gap_policy``.
+    Callers can declare known halts through ``halted`` when stricter accounting
+    is required.
     """
 
     try:
@@ -75,11 +79,15 @@ def validate_research_snapshot(
         raise ValueError("max_missing_days must not be negative")
     if not 0 <= max_missing_ratio <= 1:
         raise ValueError("max_missing_ratio must be between zero and one")
+    if excess_gap_policy not in {"block", "exclude"}:
+        raise ValueError("excess_gap_policy must be 'block' or 'exclude'")
 
     calendar = sorted(set(normalized["timestamp"].dt.date))
     halted_set = set(halted)
     errors: list[str] = []
     warnings: list[str] = []
+    excluded_symbols: list[str] = []
+    exclusion_reasons: list[str] = []
     for symbol, group in normalized.groupby("symbol", sort=True):
         observed = set(group["timestamp"].dt.date)
         first, last = min(observed), max(observed)
@@ -95,7 +103,11 @@ def validate_research_snapshot(
             f"{first.isoformat()} and {last.isoformat()} ({ratio:.2%})"
         )
         if len(missing) > max_missing_days or ratio > max_missing_ratio:
-            errors.append(message)
+            if excess_gap_policy == "exclude":
+                excluded_symbols.append(str(symbol))
+                exclusion_reasons.append(message)
+            else:
+                errors.append(message)
         else:
             warnings.append(message)
     return QualityReport(
@@ -103,4 +115,6 @@ def validate_research_snapshot(
         row_count=len(normalized),
         errors=tuple(errors),
         warnings=tuple(warnings),
+        excluded_symbols=tuple(excluded_symbols),
+        exclusion_reasons=tuple(exclusion_reasons),
     )

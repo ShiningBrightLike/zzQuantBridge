@@ -11,7 +11,7 @@
 - 回看至少 5 年日线数据，以覆盖 120 日预热、504 日训练窗口和 20 日标签期限。
 - 量价因子使用前复权收盘价；下载任务会额外保存最近 10 个交易日的未复权收盘价为 `execution_close`，实际执行参考价由建议层使用该列。若缺少未复权执行价，建议运行会被阻断。
 - 当前快照只能提供当前仍上市的股票，回测仍存在幸存者偏差；退市股票数据留待后续接入。
-- 质量闸门会检查每个标的首次到末次观测之间的缺失 bar；默认允许最多 20 个缺失日且缺失比例不超过 2%，超过阈值时选股/回测/建议运行进入 `BLOCKED`。这是为了兼容未登记的停牌，严格停牌清单可在后续数据源中补充。
+- 质量闸门会检查每个标的首次到末次观测之间的缺失 bar；默认允许最多 20 个缺失日且缺失比例不超过 2%。默认 `excess_gap_policy: exclude` 会剔除超限标的、写入 `quality_exclusions.csv` 并继续处理其余股票；只有结构性 OHLCV 错误或剩余股票池不足时才阻断。严格停牌清单可在后续数据源中补充。
 
 ## 因子
 
@@ -90,6 +90,8 @@ python -m quant select-stocks --config configs/multifactor.yaml
 python -m quant backtest --config configs/multifactor.yaml
 python -m quant generate-signals --config configs/multifactor.yaml
 ```
+
+`universe.mode: all_a` 且 `universe.auto_download: true` 时，`select-stocks` 会检查最新快照；如果股票数量、历史长度或数据新鲜度不满足要求，会先在本次运行内自动下载全市场候选池。快照数据须覆盖最近一个完整交易日：交易日 15:00 后才视为当天完成，周末和节假日使用上一个交易日。当前快照新鲜且合格时直接复用，避免重复下载。离线环境可将 `auto_download` 设为 `false` 并显式准备本地快照。
 
 只使用已有静态标的池时，把 `configs/universe.yaml` 的 `mode` 设为 `config`，或在命令行传入 `--universe-mode config`。
 

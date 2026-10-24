@@ -27,6 +27,7 @@ from .artifacts import (
 )
 from .config import load_yaml_config
 from .data.archive import archive_snapshot
+from .data.calendar import latest_completed_trading_date
 from .data.providers import AkShareDataProvider, DataFetchError, LocalDataProvider
 from .data.quality import QualityReport, validate_research_snapshot
 from .data.universe import (
@@ -184,13 +185,34 @@ def _quality_gate(
     frame: Any,
     configs_dir: Path,
     params: Mapping[str, Any],
-) -> QualityReport:
+) -> tuple[Any, QualityReport]:
     payload = _multifactor_payload(configs_dir, params).get("quality") or {}
+    max_missing_days = int(payload.get("max_missing_days", 20))
+    max_missing_ratio = float(payload.get("max_missing_ratio", 0.02))
+    excess_gap_policy = str(payload.get("excess_gap_policy", "block"))
     report = validate_research_snapshot(
         frame,
-        max_missing_days=int(payload.get("max_missing_days", 20)),
-        max_missing_ratio=float(payload.get("max_missing_ratio", 0.02)),
+        max_missing_days=max_missing_days,
+        max_missing_ratio=max_missing_ratio,
+        excess_gap_policy=excess_gap_policy,
     )
+    excluded = set(report.excluded_symbols)
+    filtered = frame
+    if excluded:
+        filtered = frame.loc[
+            ~frame["symbol"].astype(str).isin(excluded)
+        ].reset_index(drop=True)
+        write_csv(
+            context.run_dir / "quality_exclusions.csv",
+            ("symbol", "reason"),
+            [
+                {"symbol": symbol, "reason": reason}
+                for symbol, reason in zip(
+                    report.excluded_symbols,
+                    report.exclusion_reasons,
+                )
+            ],
+        )
     (context.run_dir / "data_quality.json").write_text(
         json.dumps(
             {
@@ -198,8 +220,11 @@ def _quality_gate(
                 "row_count": report.row_count,
                 "errors": list(report.errors),
                 "warnings": list(report.warnings),
-                "max_missing_days": int(payload.get("max_missing_days", 20)),
-                "max_missing_ratio": float(payload.get("max_missing_ratio", 0.02)),
+                "excluded_symbols": list(report.excluded_symbols),
+                "exclusion_reasons": list(report.exclusion_reasons),
+                "max_missing_days": max_missing_days,
+                "max_missing_ratio": max_missing_ratio,
+                "excess_gap_policy": excess_gap_policy,
             },
             indent=2,
             ensure_ascii=False,
@@ -207,7 +232,7 @@ def _quality_gate(
         + "\n",
         encoding="utf-8",
     )
-    return report
+    return filtered, report
 
 
 def _quality_blocked_summary(context: RunContext, report: QualityReport) -> dict[str, Any]:
@@ -327,25 +352,78 @@ def _snapshot_names(configs_dir: Path, manifest: Mapping[str, Any]) -> dict[str,
     return names
 
 
+def _manifest_data_as_of(data_dir: Path, payload: Mapping[str, Any]) -> date | None:
+    value = payload.get("data_as_of")
+    if value:
+        try:
+            return date.fromisoformat(str(value)[:10])
+        except ValueError:
+            pass
+    try:
+        import pandas as pd
+
+        for entry in payload.get("files", []):
+            if entry.get("kind") != "raw":
+                continue
+            path = data_dir / str(entry.get("path", ""))
+            if not path.is_file():
+                continue
+            timestamps = pd.read_parquet(path, columns=["timestamp"])["timestamp"]
+            return max(item.date() for item in timestamps)
+    except Exception:
+        pass
+    request = payload.get("request")
+    if isinstance(request, Mapping):
+        try:
+            return date.fromisoformat(str(request.get("end"))[:10])
+        except ValueError:
+            return None
+    return None
+
+
+def _manifest_created_at(payload: Mapping[str, Any]) -> datetime:
+    try:
+        value = datetime.fromisoformat(str(payload.get("created_at", "")))
+        return value if value.tzinfo else value.replace(tzinfo=ZoneInfo("UTC"))
+    except ValueError:
+        return datetime.min.replace(tzinfo=ZoneInfo("UTC"))
+
+
 def latest_snapshot(data_dir: Path) -> tuple[Path, dict[str, Any]]:
-    """Return the newest archived raw snapshot path and its manifest."""
+    """Return the raw snapshot with the newest actual data coverage."""
 
     metadata_dir = data_dir / "metadata"
-    manifests = (
-        sorted(metadata_dir.glob("*.json"), key=lambda item: item.stat().st_mtime, reverse=True)
-        if metadata_dir.is_dir()
-        else []
-    )
+    manifests = metadata_dir.glob("*.json") if metadata_dir.is_dir() else ()
+    candidates: list[tuple[date, datetime, float, Path, dict[str, Any]]] = []
     for manifest_path in manifests:
         try:
             payload = json.loads(manifest_path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             continue
+        raw_path: Path | None = None
         for entry in payload.get("files", []):
             if entry.get("kind") == "raw":
-                frame_path = data_dir / str(entry.get("path", ""))
-                if frame_path.is_file():
-                    return frame_path, payload
+                candidate = data_dir / str(entry.get("path", ""))
+                if candidate.is_file():
+                    raw_path = candidate
+                    break
+        if raw_path is None:
+            continue
+        candidates.append(
+            (
+                _manifest_data_as_of(data_dir, payload) or date.min,
+                _manifest_created_at(payload),
+                manifest_path.stat().st_mtime,
+                raw_path,
+                payload,
+            )
+        )
+    if candidates:
+        _, _, _, frame_path, payload = max(
+            candidates,
+            key=lambda item: (item[0], item[1], item[2]),
+        )
+        return frame_path, payload
     raise FileNotFoundError("no archived market snapshot found; run download first")
 
 
@@ -383,7 +461,13 @@ def resolve_initial_cash(store: PortfolioStore, params: Mapping[str, Any], confi
     return default
 
 
-def _download_task(params: Mapping[str, Any], *, data_dir: Path, configs_dir: Path) -> Task:
+def _download_task(
+    params: Mapping[str, Any],
+    *,
+    data_dir: Path,
+    configs_dir: Path,
+    finalize: bool = True,
+) -> Task:
     def run(context: RunContext) -> dict[str, Any]:
         provider_name = str(params.get("provider") or "akshare").strip().lower()
         adjustment = str(params.get("adjustment") or "")
@@ -518,10 +602,11 @@ def _download_task(params: Mapping[str, Any], *, data_dir: Path, configs_dir: Pa
         (context.run_dir / "data_manifest.json").write_text(
             json.dumps({"status": "PASS", **summary}, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
         )
-        write_run_report(context.run_dir)
-        # Status is written last: a poller that sees a terminal status must be
-        # able to trust that every artifact already exists.
-        write_status(context.run_dir, "PASS", summary)
+        if finalize:
+            write_run_report(context.run_dir)
+            # Status is written last: a poller that sees a terminal status must
+            # be able to trust that every artifact already exists.
+            write_status(context.run_dir, "PASS", summary)
         return summary
 
     return run
@@ -542,7 +627,7 @@ def _backtest_task(params: Mapping[str, Any], *, data_dir: Path, configs_dir: Pa
     def run(context: RunContext) -> dict[str, Any]:
         frame, manifest = load_snapshot(data_dir)
         if _strategy_name(configs_dir, params) == "multifactor":
-            quality = _quality_gate(context, frame, configs_dir, params)
+            frame, quality = _quality_gate(context, frame, configs_dir, params)
             if quality.blocked:
                 return _quality_blocked_summary(context, quality)
             settings = _multifactor_settings(configs_dir, params)
@@ -683,7 +768,7 @@ def _signals_task(params: Mapping[str, Any], *, data_dir: Path, configs_dir: Pat
         strategy_name = _strategy_name(configs_dir, params)
         selection: SelectionResult | None = None
         if strategy_name == "multifactor":
-            quality = _quality_gate(context, frame, configs_dir, params)
+            frame, quality = _quality_gate(context, frame, configs_dir, params)
             if quality.blocked:
                 return _quality_blocked_summary(context, quality)
             multifactor_settings = _multifactor_settings(configs_dir, params)
@@ -849,13 +934,198 @@ def _signals_task(params: Mapping[str, Any], *, data_dir: Path, configs_dir: Pat
     return run
 
 
+def _multifactor_snapshot_ready(
+    frame: Any | None,
+    settings: MultifactorStrategyConfig,
+    *,
+    required_data_as_of: date | None = None,
+) -> bool:
+    """Check whether a local snapshot is broad, long, and fresh enough to train."""
+
+    return _multifactor_snapshot_issue(
+        frame,
+        settings,
+        required_data_as_of=required_data_as_of,
+    ) is None
+
+
+def _multifactor_snapshot_issue(
+    frame: Any | None,
+    settings: MultifactorStrategyConfig,
+    *,
+    required_data_as_of: date | None = None,
+) -> str | None:
+    """Return a human-readable reason why a snapshot needs replacement."""
+
+    if frame is None or len(frame) == 0:
+        return "no market snapshot is available"
+    symbol_count = int(frame["symbol"].nunique())
+    date_count = int(frame["timestamp"].nunique())
+    if symbol_count < settings.training.min_cross_section:
+        return (
+            f"snapshot has {symbol_count} symbols, below the required "
+            f"{settings.training.min_cross_section}"
+        )
+    required_dates = (
+        settings.universe.min_history_days
+        + settings.training.label_horizon
+        + max(settings.training.lookback_days, settings.training.min_ic_days)
+    )
+    if date_count < required_dates:
+        return (
+            f"snapshot has {date_count} trading dates, below the required "
+            f"{required_dates}"
+        )
+    actual_data_as_of = data_as_of(frame)
+    if (
+        required_data_as_of is not None
+        and actual_data_as_of is not None
+        and actual_data_as_of < required_data_as_of
+    ):
+        return (
+            f"snapshot data ends {actual_data_as_of.isoformat()}, before the latest "
+            f"completed trading day {required_data_as_of.isoformat()}"
+        )
+    return None
+
+
+def _multifactor_download_params(
+    params: Mapping[str, Any],
+    settings: MultifactorStrategyConfig,
+) -> dict[str, Any]:
+    """Build an all-A download request from the multifactor universe settings."""
+
+    universe = settings.universe
+    return {
+        "provider": "akshare",
+        "adjustment": "qfq",
+        "start": params.get("start"),
+        "end": params.get("end"),
+        "execution_prices": params.get("execution_prices", True),
+        "universe": {
+            "mode": "all_a",
+            "max_symbols": universe.max_symbols,
+            "candidate_pool_size": universe.candidate_pool_size,
+            "min_history_days": universe.min_history_days,
+            "min_avg_dollar_volume": universe.min_avg_dollar_volume,
+            "exclude_st": universe.exclude_st,
+            "exclude_bj": universe.exclude_bj,
+            "include_chi_next": universe.include_chi_next,
+            "include_star": universe.include_star,
+        },
+    }
+
+
+def _freshness_blocked_summary(
+    context: RunContext,
+    *,
+    reason: str,
+    expected_data_as_of: date,
+    actual_data_as_of: date | None,
+    freshness_source: str,
+    auto_download: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    payload = {
+        "status": "BLOCKED",
+        "data_freshness_error": reason,
+        "expected_data_as_of": expected_data_as_of.isoformat(),
+        "snapshot_data_as_of": (
+            actual_data_as_of.isoformat() if actual_data_as_of is not None else None
+        ),
+        "freshness_source": freshness_source,
+        "auto_download": auto_download,
+        "artifacts": ["report.html"],
+    }
+    write_status(context.run_dir, "BLOCKED", payload)
+    write_run_report(context.run_dir)
+    return payload
+
+
 def _selection_task(params: Mapping[str, Any], *, data_dir: Path, configs_dir: Path, db_path: Path) -> Task:
     def run(context: RunContext) -> dict[str, Any]:
-        frame, manifest = load_snapshot(data_dir)
-        quality = _quality_gate(context, frame, configs_dir, params)
+        settings = _multifactor_settings(configs_dir, params)
+        snapshot_error: Exception | None = None
+        try:
+            frame, manifest = load_snapshot(data_dir)
+        except (FileNotFoundError, ValueError) as exc:
+            frame, manifest, snapshot_error = None, None, exc
+
+        auto_download: dict[str, Any] | None = None
+        expected_data_as_of: date | None = None
+        freshness_source: str | None = None
+        refresh_reason: str | None = None
+        provider = str(params.get("provider") or "akshare").strip().lower()
+        should_auto_download = (
+            settings.universe.auto_download
+            and settings.universe.mode == "all_a"
+            and provider != "local"
+        )
+        if should_auto_download:
+            refresh_reason = _multifactor_snapshot_issue(frame, settings)
+            if refresh_reason is None:
+                expected_data_as_of, freshness_source = latest_completed_trading_date()
+                refresh_reason = _multifactor_snapshot_issue(
+                    frame,
+                    settings,
+                    required_data_as_of=expected_data_as_of,
+                )
+        if should_auto_download and refresh_reason is not None:
+            write_status(
+                context.run_dir,
+                "RUNNING",
+                {
+                    "phase": "DOWNLOADING_MARKET_DATA",
+                    "message": f"正在刷新全市场行情：{refresh_reason}",
+                },
+            )
+            download_params = _multifactor_download_params(params, settings)
+            download_summary = _download_task(
+                download_params,
+                data_dir=data_dir,
+                configs_dir=configs_dir,
+                finalize=False,
+            )(context)
+            frame, manifest = load_snapshot(data_dir)
+            auto_download = {
+                "trigger": refresh_reason,
+                "snapshot": manifest.get("snapshot_id"),
+                "rows": download_summary.get("rows"),
+                "universe_size": download_summary.get("universe_size"),
+                "start": download_summary.get("start"),
+                "end": download_summary.get("end"),
+                "data_as_of": download_summary.get("data_as_of"),
+                "failed_symbol_count": len(download_summary.get("failed_symbols", {})),
+            }
+            if (context.run_dir / "download_failures.json").is_file():
+                auto_download["failure_report"] = "download_failures.json"
+            expected_data_as_of, freshness_source = latest_completed_trading_date()
+            post_download_issue = _multifactor_snapshot_issue(
+                frame,
+                settings,
+                required_data_as_of=expected_data_as_of,
+            )
+            if post_download_issue is not None:
+                return _freshness_blocked_summary(
+                    context,
+                    reason=post_download_issue,
+                    expected_data_as_of=expected_data_as_of,
+                    actual_data_as_of=data_as_of(frame),
+                    freshness_source=freshness_source,
+                    auto_download=auto_download,
+                )
+
+        if frame is None or manifest is None:
+            if snapshot_error is not None:
+                raise snapshot_error
+            raise FileNotFoundError("no archived market snapshot found; run download first")
+        write_status(
+            context.run_dir,
+            "RUNNING",
+            {"phase": "COMPUTING_FACTORS", "message": "正在训练因子并生成横截面选股结果"},
+        )
+        frame, quality = _quality_gate(context, frame, configs_dir, params)
         if quality.blocked:
             return _quality_blocked_summary(context, quality)
-        settings = _multifactor_settings(configs_dir, params)
         store = PortfolioStore(db_path)
         initial_cash = resolve_initial_cash(store, params, configs_dir)
         backtest_config = _selection_backtest_config(configs_dir, params, initial_cash)
@@ -900,6 +1170,8 @@ def _selection_task(params: Mapping[str, Any], *, data_dir: Path, configs_dir: P
             )
         status = "PASS" if selection.targets and backtest_error is None else "BLOCKED"
         artifact_names = [
+            "data_quality.json",
+            "quality_exclusions.csv",
             "factor_snapshot.csv",
             "factor_weights.csv",
             "selections.csv",
@@ -926,6 +1198,13 @@ def _selection_task(params: Mapping[str, Any], *, data_dir: Path, configs_dir: P
             "initial_cash": initial_cash,
             "backtest": backtest_summary if backtest_summary else {},
             "backtest_error": backtest_error,
+            "auto_download": auto_download,
+            "snapshot_data_as_of": data_as_of(frame).isoformat() if data_as_of(frame) else None,
+            "expected_data_as_of": (
+                expected_data_as_of.isoformat() if expected_data_as_of is not None else None
+            ),
+            "freshness_source": freshness_source,
+            "quality_excluded": len(quality.excluded_symbols),
             "artifacts": [
                 name for name in artifact_names if (context.run_dir / name).is_file()
             ],
@@ -961,17 +1240,28 @@ def build_task(
     raise ValueError(f"unsupported run kind: {kind}")
 
 
-def market_figure(frame: Any) -> tuple[dict[str, Any], str]:
-    """Build a candlestick + volume figure for the first available symbol."""
+def market_symbols(frame: Any) -> list[str]:
+    """Return the symbols available in the current market snapshot."""
 
-    symbols = sorted(str(item) for item in frame["symbol"].unique())
-    symbol = symbols[0]
-    data = frame.loc[frame["symbol"] == symbol].sort_values("timestamp")
+    return sorted(str(item) for item in frame["symbol"].unique())
+
+
+def market_figure(
+    frame: Any, symbol: str | None = None
+) -> tuple[dict[str, Any], str, str]:
+    """Build a candlestick + volume figure for the requested snapshot symbol."""
+
+    symbols = market_symbols(frame)
+    if not symbols:
+        raise ValueError("market snapshot contains no symbols")
+    requested = str(symbol).strip() if symbol else None
+    selected = requested if requested in symbols else symbols[0]
+    data = frame.loc[frame["symbol"].astype(str) == selected].sort_values("timestamp")
     figure = {
         "data": [
             {
                 "type": "candlestick",
-                "name": symbol,
+                "name": selected,
                 "x": [item.isoformat() for item in data["timestamp"]],
                 "open": [float(item) for item in data["open"]],
                 "high": [float(item) for item in data["high"]],
@@ -989,7 +1279,7 @@ def market_figure(frame: Any) -> tuple[dict[str, Any], str]:
         ],
         "layout": {
             "template": "plotly_dark",
-            "title": {"text": f"{symbol} 日线"},
+            "title": {"text": f"{selected} 日线"},
             "xaxis": {"rangeslider": {"visible": False}},
             "yaxis": {"title": {"text": "price"}, "domain": [0.28, 1.0]},
             "yaxis2": {"title": {"text": "volume"}, "domain": [0.0, 0.2], "anchor": "x"},
@@ -997,7 +1287,9 @@ def market_figure(frame: Any) -> tuple[dict[str, Any], str]:
         },
     }
     message = f"共 {len(data)} 根 bar；快照标的：{', '.join(symbols)}"
-    return figure, message
+    if requested and requested not in symbols:
+        message = f"标的不在当前快照中：{requested}；已显示 {selected}。{message}"
+    return figure, message, selected
 
 
 def _latest_artifact(runs_dir: Path, filename: str) -> Path | None:

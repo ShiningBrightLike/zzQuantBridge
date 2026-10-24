@@ -44,6 +44,10 @@ th { color: var(--muted); font-size: 12px; font-weight: 600; }
 .button { background: var(--accent); border-radius: 8px; color: #081021; font-weight: 750; padding: 9px 14px; }
 .button:hover { text-decoration: none; filter: brightness(1.08); }
 .actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.market-controls { align-items: center; display: flex; flex-wrap: wrap; gap: 12px; justify-content: flex-end; }
+.market-picker { align-items: center; display: flex; gap: 10px; }
+.market-picker label { color: var(--muted); white-space: nowrap; }
+.market-picker select { min-width: 220px; width: auto; }
 button { border: 0; cursor: pointer; font: inherit; }
 button:disabled { cursor: wait; opacity: .55; }
 input[type=file] { border: 1px dashed var(--line); border-radius: 8px; color: var(--muted); display: block; margin-bottom: 16px; padding: 12px; width: 100%; }
@@ -53,4 +57,4 @@ input, select { background: #0a0f1d; border: 1px solid var(--line); border-radiu
 .check input { width: auto; }
 .mono, pre { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
 pre { background: #0a0f1d; border: 1px solid var(--line); border-radius: 8px; overflow: auto; padding: 16px; }
-@media (max-width: 720px) { .topbar, .hero, .page-heading { align-items: flex-start; flex-direction: column; } nav { flex-wrap: wrap; gap: 12px; } .cards, .fill-fields { grid-template-columns: 1fr; } .container { padding: 28px 16px 56px; } }
+@media (max-width: 720px) { .topbar, .hero, .page-heading { align-items: flex-start; flex-direction: column; } nav { flex-wrap: wrap; gap: 12px; } .cards, .fill-fields { grid-template-columns: 1fr; } .market-controls { align-items: flex-start; justify-content: flex-start; } .market-picker { align-items: stretch; flex-direction: column; width: 100%; } .market-picker select { min-width: 0; width: 100%; } .container { padding: 28px 16px 56px; } }

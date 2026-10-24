@@ -25,13 +25,13 @@ python -m pip install -e ".[data,backtest,web,test]"
 python -m quant.server --host 127.0.0.1 --port 8000
 ```
 
-浏览器打开 <http://127.0.0.1:8000/>。Web 端默认同一时间只运行一个下载、回测或建议任务；成交回录需要先预览、再确认写入。
+浏览器打开 <http://127.0.0.1:8000/>。行情页可在右上角切换快照中的股票，也可以直接访问 `/market?symbol=600000`。Web 端默认同一时间只运行一个下载、回测或建议任务；成交回录需要先预览、再确认写入。
 
 ## 常用流程
 
 ### 准备行情
 
-在线下载默认使用 AkShare，并在多个上游端点之间自动重试：
+在线下载默认使用 AkShare，并在多个上游端点之间自动重试。单个端点返回非法 OHLC 时会尝试备用端点；如果某只股票最终下载失败，会记录到 `download_failures.json`，不中断其他股票：
 
 ```bash
 python -m quant download \
@@ -65,7 +65,7 @@ python -m quant generate-signals --config configs/strategy.yaml
 
 ### 多因子选股
 
-多因子流程建议准备至少 5 年的前复权日线数据。完成行情下载后运行：
+多因子流程建议准备至少 5 年的前复权日线数据。`all_a` 模式下，如果当前快照不存在、股票数量不足、历史长度不够，或数据尚未覆盖最近一个完整交易日，`select-stocks` 会自动下载全市场候选池后再选股。交易日按 A 股日历和 15:00 收盘时间判断，周末和节假日不会误触发刷新；已有合格快照会直接复用。自动下载默认覆盖约 5 年数据，可在 `configs/multifactor.yaml` 中设置 `universe.auto_download: false` 关闭。
 
 ```bash
 python -m quant select-stocks --config configs/multifactor.yaml
@@ -74,6 +74,8 @@ python -m quant generate-signals --config configs/multifactor.yaml
 ```
 
 股票池、因子、滚动训练、Top-N 和调仓规则均在 `configs/multifactor.yaml` 中配置。模型定义、执行价口径与已知限制见 [多因子模型说明](docs/multifactor-model.md)。
+
+多因子研究默认按股票隔离缺失数据问题：单只股票超过缺失阈值时写入 `quality_exclusions.csv` 并从本次训练剔除，其余股票继续处理。非法 OHLC、重复 bar 等结构性错误仍会阻断运行。
 
 ### 回录成交
 
@@ -88,7 +90,7 @@ python -m quant reconcile \
 
 ## 运行产物
 
-每次命令都会创建 `runs/<date>/<run_id>/`，并写入 `input_manifest.json` 和 `run.log`；任务完成后通过 `status.json` 记录 `PASS`、`BLOCKED` 或 `ERROR`，业务任务通常还会生成 `report.html`。按任务不同，还会生成：
+每次命令都会创建 `runs/<date>/<run_id>/`，并写入 `input_manifest.json` 和 `run.log`。新运行 ID 使用 `YYYYMMDD-HHMMSS-操作-随机后缀` 格式，例如 `20261024-195252-select-stocks-a1b2c3`；任务完成后通过 `status.json` 记录 `PASS`、`BLOCKED` 或 `ERROR`，业务任务通常还会生成 `report.html`。按任务不同，还会生成：
 
 - 数据：`data_quality.json`
 - 回测：`backtest_metrics.json`、`equity_curve.csv`、`trades.csv`、`sensitivity.json`

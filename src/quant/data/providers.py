@@ -127,7 +127,11 @@ class AkShareDataProvider:
                 attempt_errors = []
                 for endpoint in self.endpoints:
                     try:
-                        frames.append(self._request(ak, endpoint, symbol, start, end))
+                        frame = self._request(ak, endpoint, symbol, start, end)
+                        # Validate each endpoint response before accepting it.
+                        # A single zero-price row should trigger fallback to the
+                        # next provider instead of aborting the whole universe.
+                        frames.append(normalize_ohlcv(frame))
                     except Exception as exc:  # provider errors vary by endpoint
                         last_error = exc
                         attempt_errors.append(f"{endpoint}: {exc}")

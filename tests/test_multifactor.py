@@ -5,6 +5,7 @@ import pytest
 
 pd = pytest.importorskip("pandas")
 
+from quant.data.archive import archive_snapshot
 from quant.data.universe import (
     UniverseConfig,
     build_universe_membership,
@@ -22,8 +23,11 @@ from quant.tasks import (
     _cross_sectional_backtest_config,
     _latest_prices,
     _merge_execution_close,
+    _multifactor_snapshot_issue,
+    _multifactor_snapshot_ready,
     _selection_backtest_config,
 )
+from quant.strategies.multifactor import MultifactorStrategyConfig
 from quant.webapp import JobManager, find_run
 
 
@@ -236,7 +240,11 @@ def _wait(runs_dir, run_id, timeout=120):
     while time.time() < deadline:
         record = find_run(run_id, runs_dir)
         if record is not None and record.status not in {"QUEUED", "RUNNING"}:
-            return record
+            # Pollers can observe the task's terminal status just before the
+            # manager publishes the same completed payload. Re-read once that
+            # hand-off has settled so assertions see the final summary.
+            time.sleep(0.1)
+            return find_run(run_id, runs_dir) or record
         time.sleep(0.05)
     raise AssertionError("run did not finish")
 
@@ -308,3 +316,126 @@ def test_select_stocks_task_writes_factor_and_backtest_artifacts(tmp_path):
     assert status == record.status
     assert reasons
     assert metadata["model_version"]
+
+
+def test_select_stocks_auto_downloads_all_a_snapshot(tmp_path, monkeypatch):
+    frame = _frame(symbols=20, days=320)
+    data_dir = tmp_path / "data"
+    runs_dir = tmp_path / "runs"
+    calls = []
+
+    def fake_download_task(params, *, data_dir, configs_dir, finalize=True):
+        calls.append((params, finalize))
+
+        def run(context):
+            manifest = archive_snapshot(
+                frame,
+                data_dir,
+                source="test",
+                request={"symbols": sorted(frame["symbol"].unique().tolist())},
+                adjustment="qfq",
+            )
+            return {
+                "rows": len(frame),
+                "universe_size": int(frame["symbol"].nunique()),
+                "start": str(frame["timestamp"].min().date()),
+                "end": str(frame["timestamp"].max().date()),
+                "data_as_of": str(frame["timestamp"].max().date()),
+                "manifest": str(manifest),
+            }
+
+        return run
+
+    monkeypatch.setattr("quant.tasks._download_task", fake_download_task)
+    latest_date = frame["timestamp"].max().date()
+    monkeypatch.setattr(
+        "quant.tasks.latest_completed_trading_date",
+        lambda: (latest_date, "provided"),
+    )
+    manager = JobManager(runs_dir)
+    params = {
+        "provider": "akshare",
+        "universe": {
+            "mode": "all_a",
+            "auto_download": True,
+            "max_symbols": 20,
+            "min_history_days": 40,
+            "min_avg_dollar_volume": 0,
+        },
+        "training": {
+            "lookback_days": 100,
+            "label_horizon": 20,
+            "min_cross_section": 10,
+            "min_ic_days": 30,
+            "max_factors": 4,
+        },
+        "selection": {
+            "top_n": 5,
+            "hold_buffer": 8,
+            "max_single_weight": 0.15,
+            "cash_buffer": 0.1,
+            "rebalance_days": 20,
+        },
+        "backtest": {"init_cash": 100000, "fees": 0.0003, "slippage": 0.0005},
+    }
+    try:
+        task = build_task(
+            "select-stocks",
+            params,
+            data_dir=data_dir,
+            configs_dir=tmp_path / "configs",
+            db_path=tmp_path / "portfolio.sqlite",
+        )
+        record = _wait(runs_dir, manager.submit("select-stocks", task).run_id)
+    finally:
+        manager.shutdown()
+
+    assert record.status in {"PASS", "BLOCKED"}, record.payload
+    assert calls
+    assert calls[0][1] is False
+    assert calls[0][0]["universe"]["mode"] == "all_a"
+    assert calls[0][0]["adjustment"] == "qfq"
+    assert "auto_download" in record.payload, record.payload
+    assert record.payload["auto_download"]["universe_size"] == 20
+
+
+def test_multifactor_snapshot_readiness_requires_breadth_and_history():
+    settings = MultifactorStrategyConfig.from_mapping(
+        {
+            "universe": {
+                "mode": "all_a",
+                "min_history_days": 40,
+                "max_symbols": 20,
+            },
+            "training": {
+                "lookback_days": 100,
+                "label_horizon": 20,
+                "min_cross_section": 10,
+                "min_ic_days": 30,
+            },
+        }
+    )
+
+    frame = _frame(symbols=20, days=320)
+    latest_date = frame["timestamp"].max().date()
+
+    assert _multifactor_snapshot_ready(
+        frame,
+        settings,
+        required_data_as_of=latest_date,
+    )
+    assert not _multifactor_snapshot_ready(_frame(symbols=2, days=320), settings)
+    assert not _multifactor_snapshot_ready(_frame(symbols=20, days=100), settings)
+    assert not _multifactor_snapshot_ready(
+        frame,
+        settings,
+        required_data_as_of=latest_date + timedelta(days=1),
+    )
+    assert "before the latest completed trading day" in (
+        _multifactor_snapshot_issue(
+            frame,
+            settings,
+            required_data_as_of=latest_date + timedelta(days=1),
+        )
+        or ""
+    )

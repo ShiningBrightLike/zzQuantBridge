@@ -1,6 +1,23 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="page-heading"><div><p class="eyebrow">MARKET DATA</p><h1>行情</h1></div><span class="status status-blocked">本地快照</span></div>
+<div class="page-heading">
+  <div><p class="eyebrow">MARKET DATA</p><h1>行情</h1></div>
+  <div class="market-controls">
+    {% if symbols %}
+    <form class="market-picker" method="get" action="/market">
+      <label for="market-symbol">观察标的</label>
+      <select id="market-symbol" name="symbol">
+        {% for item in symbols %}
+        {% set stock_name = names.get(item) %}
+        <option value="{{ item }}"{% if item == selected_symbol %} selected{% endif %}>{{ item }}{% if stock_name %} · {{ stock_name }}{% endif %}</option>
+        {% endfor %}
+      </select>
+      <button class="button" type="submit">切换</button>
+    </form>
+    {% endif %}
+    <span class="status status-blocked">本地快照</span>
+  </div>
+</div>
 <section class="panel"><div id="market-chart" class="chart"></div><p class="muted">{{ message }}</p></section>
 <script>window.addEventListener('load',()=>{const f={{ figure|tojson }}; if(window.Plotly) Plotly.newPlot('market-chart',f.data,f.layout,{responsive:true});});</script>
 {% endblock %}

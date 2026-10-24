@@ -6,8 +6,9 @@ from datetime import date
 import json
 from pathlib import Path
 import secrets
-from typing import Any
+from typing import Any, Mapping
 
+from .data.universe import config_names
 from .webapp import (
     JobConflictError,
     JobManager,
@@ -19,7 +20,15 @@ from .webapp import (
     parse_fill_rows,
     preview_trades,
 )
-from .tasks import build_task, equity_figure, latest_orders, latest_selections, load_snapshot, market_figure
+from .tasks import (
+    build_task,
+    equity_figure,
+    latest_orders,
+    latest_selections,
+    load_snapshot,
+    market_figure,
+    market_symbols,
+)
 from .maintenance import CONFIRM_TOKEN, MaintenanceError, clear_history, format_mb, history_summary
 
 
@@ -81,13 +90,42 @@ def create_app(
         return page_response("home.html", request, runs=list_runs(runs_dir, limit=10), active_run_id=manager.active_run_id)
 
     @app.get("/market", response_class=HTMLResponse)
-    def market(request: Request) -> HTMLResponse:
+    def market(request: Request, symbol: str | None = None) -> HTMLResponse:
         try:
             frame, manifest = load_snapshot(Path(data_dir))
         except (FileNotFoundError, ImportError, ValueError) as exc:
-            return page_response("market.html", request, figure=empty_plot("行情"), message=str(exc))
-        figure, message = market_figure(frame)
-        return page_response("market.html", request, figure=figure, message=message, snapshot=manifest.get("snapshot_id"))
+            return page_response(
+                "market.html",
+                request,
+                figure=empty_plot("行情"),
+                message=str(exc),
+                symbols=[],
+                selected_symbol=None,
+                names=config_names(Path(configs_dir)),
+            )
+        figure, message, selected_symbol = market_figure(frame, symbol)
+        names = config_names(Path(configs_dir))
+        request_payload = manifest.get("request")
+        if isinstance(request_payload, Mapping):
+            requested_names = request_payload.get("names")
+            if isinstance(requested_names, Mapping):
+                names.update(
+                    {
+                        str(key): str(value)
+                        for key, value in requested_names.items()
+                        if value
+                    }
+                )
+        return page_response(
+            "market.html",
+            request,
+            figure=figure,
+            message=message,
+            snapshot=manifest.get("snapshot_id"),
+            symbols=market_symbols(frame),
+            selected_symbol=selected_symbol,
+            names=names,
+        )
 
     @app.get("/backtest", response_class=HTMLResponse)
     def backtest(request: Request) -> HTMLResponse:
