@@ -1,74 +1,37 @@
-﻿# zzQuantBridge
+# zzQuantBridge
 
-面向个人研究与交易的 **vectorbt + 人工执行** 量化系统。项目自动获取和整理行情数据，运行策略与回测，维护模拟或真实组合状态，并生成可供人工确认的交易建议；实际下单由人在证券公司交易系统中完成，成交结果再回录系统。
+面向个人研究与人工执行的 A 股量化工具。项目负责行情获取与校验、策略回测、多因子选股、风险检查、组合对账和交易建议生成；不连接券商，也不自动下单。
 
-> 当前仓库已完成 M0 项目骨架、M1 数据层、组合/建议层和本机 Web UI 的第一批实现：配置可读取，CLI 与 FastAPI 服务共享运行审计、行情校验、策略、SQLite 成交账本和人工交易建议能力。现已加入可滚动训练的多因子选股、横截面回测和 Web 查看页面。
+## 界面预览
 
-## 开始使用
+以下截图基于本地示例数据，仅用于展示功能。Web 首页集中展示最近运行记录，并可直接触发下载、选股、回测和建议生成。
 
-使用 Python 3.11 或更高版本安装项目及测试依赖：
+![zzQuantBridge Web 首页](docs/screenshots/dashboard.png)
+
+多因子选股页面展示模型状态、入选股票、综合得分和目标权重。
+
+![多因子选股页面](docs/screenshots/selection.png)
+
+回测页面展示组合净值曲线和最近的回测运行记录。
+
+![回测页面](docs/screenshots/backtest.png)
+
+## 快速开始
+
+需要 Python 3.11 或更高版本。
 
 ```bash
-python -m pip install -e ".[data,backtest,test]"
-```
-
-安装本机 Web UI：
-
-```bash
-python -m pip install -e ".[web,data,backtest]"
+python -m pip install -e ".[data,backtest,web,test]"
 python -m quant.server --host 127.0.0.1 --port 8000
 ```
 
-浏览器打开 <http://127.0.0.1:8000/>。Web 服务默认只允许一个下载、回测或建议任务同时运行；成交回录先预览，再确认写入 SQLite。
+浏览器打开 <http://127.0.0.1:8000/>。Web 端默认同一时间只运行一个下载、回测或建议任务；成交回录需要先预览、再确认写入。
 
-也可以直接安装当前完整依赖列表：
+## 常用流程
 
-```bash
-python -m pip install -r requirements.txt
-```
+### 准备行情
 
-需要在线获取 A 股数据时安装数据依赖：
-
-```bash
-python -m pip install -e ".[data]"
-```
-
-每个 CLI 命令都会创建 `runs/<date>/<run_id>/`，并写入 `input_manifest.json` 和当前状态文件。M0 阶段命令先负责建立可追溯的运行边界：
-
-```bash
-python -m quant download --date 2026-10-08 --config configs/universe.yaml
-python -m quant backtest --config configs/strategy.yaml
-python -m quant validate-data --file data/processed/sample.csv --symbols 600000
-python -m quant reconcile --file fills.csv --db db/portfolio.sqlite --initial-cash 100000
-```
-
-`download` 默认使用 AkShare；需要离线复现时可以指定本地快照：
-
-```bash
-python -m quant download --provider local --file snapshot.csv \
-  --config configs/universe.yaml --start 2026-01-01 --end 2026-10-08
-```
-
-AkShare 聚合的是公开数据接口，单个上游会限流或断连，因此下载会按 `eastmoney` → `sina` → `tencent` 依次尝试，并在运行状态里记录实际生效的端点（`endpoints` 字段）。三个端点都失败时，`status.json` 的 `error` 会包含每个端点的具体报错。
-
-`validate-data` 会在运行目录写入 `data_quality.json`；缺失、重复或异常 OHLCV 会标记为 `BLOCKED`。预期交易日历取快照中所有标的的交易日并集，因此某个标的缺一根 bar 会被识别为数据缺口。
-
-`backtest` 与 `generate-signals` 使用与 Web UI 相同的实现，运行后会写入：
-
-- `backtest_metrics.json`、`equity_curve.csv`、`trades.csv`
-- `sensitivity.json`：成本倍数、信号延迟、滚动窗口三组敏感性
-- `signals.csv`、`orders.csv`、`risk_report.json`、`portfolio_snapshot.json`
-- `report.html`：按“风险 → 动作 → 原因”组织的运行报告
-
-生成建议前会执行强制风险检查（单标的权重、行业集中度、总仓位、现金缓冲、单日换手、最小成交金额、价格有效性和数据新鲜度）。任一检查失败时，建议状态为 `BLOCKED`，不会放行。
-
-`reconcile` 会幂等导入成交 CSV，并在运行目录保存 `portfolio_snapshot.json`。CSV 至少需要 `trade_id,symbol,side,quantity,price,fee,executed_at` 列。
-
-## 多因子选股
-
-新增的 `select-stocks` 命令从大范围 A 股股票池中计算量价因子，使用滚动 IC/ICIR 权重生成横截面综合得分，并按 Top-N 结果输出目标仓位和样本外回测。默认股票池会排除 ST、退市、北交所、停牌和低流动性股票：先取当前成交额前约 1600 只作为候选，再按 60 日平均成交额保留约 800 只。筛选规则在 `configs/multifactor.yaml` 中配置；`candidate_pool_size: 0` 表示候选池为最终池的 2 倍，显式调大可以覆盖更多 A 股。
-
-首次使用需要准备至少约 5 年的日线数据：
+在线下载默认使用 AkShare，并在多个上游端点之间自动重试：
 
 ```bash
 python -m quant download \
@@ -78,9 +41,31 @@ python -m quant download \
   --end 2026-10-18
 ```
 
-因子研究建议使用前复权快照。下载任务默认额外获取最近 10 个交易日的未复权收盘价并保存为 `execution_close`，建议层优先使用该列；如果没有未复权价格，生成建议会因执行价格口径不明确而阻断。默认 `top_n=20`、初始资金 10 万时，高价股可能无法买入一整手，系统会在 `model_metadata.json` 中标记 `selection_limited`；可提高初始资金、减少 `top_n` 或调整 `selection.lot_size` 预算。
+离线复现时可改用本地快照：
 
-然后运行选股、回测和建议：
+```bash
+python -m quant download \
+  --provider local \
+  --file snapshot.csv \
+  --config configs/universe.yaml
+```
+
+检查 CSV 或 Parquet 行情质量：
+
+```bash
+python -m quant validate-data --file data/processed/sample.csv --symbols 600000
+```
+
+### 均线策略
+
+```bash
+python -m quant backtest --config configs/strategy.yaml
+python -m quant generate-signals --config configs/strategy.yaml
+```
+
+### 多因子选股
+
+多因子流程建议准备至少 5 年的前复权日线数据。完成行情下载后运行：
 
 ```bash
 python -m quant select-stocks --config configs/multifactor.yaml
@@ -88,187 +73,41 @@ python -m quant backtest --config configs/multifactor.yaml
 python -m quant generate-signals --config configs/multifactor.yaml
 ```
 
-Web 首页的“多因子选股”按钮和 `/selection` 页面也可以触发和查看最新结果。选股运行会写入：
+股票池、因子、滚动训练、Top-N 和调仓规则均在 `configs/multifactor.yaml` 中配置。模型定义、执行价口径与已知限制见 [多因子模型说明](docs/multifactor-model.md)。
 
-- `factor_snapshot.csv`、`factor_weights.csv`、`selections.csv`
-- `signals.csv`、`universe.csv`、`model_metadata.json`
-- `backtest_metrics.json`、`equity_curve.csv`、`trades.csv`、`sensitivity.json`
-- `data_quality.json`、`skipped_rebalances.csv`（如有跳过调仓）
-- `report.html`
-
-模型不会直接下单。训练只使用已经实现的前瞻收益，调仓日之后的数据不会参与当日得分；详细定义和限制见 [多因子模型说明](docs/multifactor-model.md)。
-
-## 清除历史记录
-
-本地命令默认只预览，不会删除任何内容：
+### 回录成交
 
 ```bash
-python -m quant clear-history
+python -m quant reconcile \
+  --file fills.csv \
+  --db db/portfolio.sqlite \
+  --initial-cash 100000
 ```
 
-确认后再执行。默认清理运行记录和行情快照，组合数据库需要显式指定：
+成交 CSV 至少包含 `trade_id,symbol,side,quantity,price,fee,executed_at`。导入按 `trade_id` 幂等，组合状态以成交账本为准。
 
-```bash
-python -m quant clear-history --yes                 # runs + data
-python -m quant clear-history --runs --yes          # 只清理运行记录
-python -m quant clear-history --data --yes          # 只清理行情快照
-python -m quant clear-history --db --yes            # 连成交账本一起删除
-python -m quant clear-history --keep-days 30 --yes  # 保留最近 30 天
-```
+## 运行产物
 
-Web 端在“维护”页面操作：先看历史占用，勾选范围，输入 `CLEAR` 后点击清除。清理动作会写一条 `clear-history` 运行记录，保留操作审计。
+每次命令都会创建 `runs/<date>/<run_id>/`，并写入 `input_manifest.json` 和 `run.log`；任务完成后通过 `status.json` 记录 `PASS`、`BLOCKED` 或 `ERROR`，业务任务通常还会生成 `report.html`。按任务不同，还会生成：
 
-## 项目目标
+- 数据：`data_quality.json`
+- 回测：`backtest_metrics.json`、`equity_curve.csv`、`trades.csv`、`sensitivity.json`
+- 建议：`signals.csv`、`orders.csv`、`risk_report.json`、`portfolio_snapshot.json`
+- 选股：`factor_snapshot.csv`、`factor_weights.csv`、`selections.csv`、`model_metadata.json`
 
-第一版围绕三个问题建立可追溯的日线量化工作流：
+## 安全边界
 
-1. 今天使用了什么数据和模型？
-2. 系统建议了哪些动作，为什么？
-3. 实际成交后，组合状态是否能准确恢复和对账？
+- 策略只输出目标仓位，风险检查通过后才生成交易建议；检查失败时标记为 `BLOCKED`。
+- 建议、订单和实际成交分别保存，建议不会被当作成交。
+- 多因子建议优先使用未复权执行价；缺少明确执行价时会阻断。
+- 原始行情只追加，运行输入、配置和输出均可追溯。
+- `python -m quant clear-history` 默认只预览；确认后加 `--yes` 才会删除。可用 `--runs`、`--data` 或 `--db` 限定清理范围。
 
-核心输出包括：
+## 配置与文档
 
-- 当前组合状态、现金、持仓和净值曲线
-- 策略计算出的目标仓位
-- 相对当前持仓的买入、卖出或减仓建议
-- 建议数量、参考价格、风险限制和信号原因
-- 实际成交后的组合更新与绩效记录
+- 配置：`configs/universe.yaml`、`strategy.yaml`、`risk.yaml`、`multifactor.yaml`
+- 模型说明：[多因子模型](docs/multifactor-model.md)
+- 架构决策：[docs/adr/](docs/adr/)
+- 项目规划：[vectorbt-manual-execution-plan.md](vectorbt-manual-execution-plan.md)
 
-## 设计原则
-
-- **人工执行优先**：第一版不接券商 API，不自动下单。
-- **建议与成交分离**：目标仓位、交易建议和实际成交分别保存，建议不会被当作成交。
-- **研究与组合分离**：研究结果可重复运行，组合状态则以成交记录为准。
-- **风险检查前置**：任何风险检查失败时，建议状态为 `BLOCKED`，不生成可执行动作。
-- **数据可追溯**：原始数据只追加不覆盖，每次运行保存数据清单、模型版本和输出文件。
-- **先规则基线，后机器学习**：先用简单、可解释的策略验证整个链路，再接入 DRL 等模型。
-
-## 总体流程
-
-```text
-数据源
-  -> 原始数据归档（Parquet）
-  -> 清洗、复权、时间对齐
-  -> 特征生成
-  -> 策略或模型
-  -> 目标仓位
-  -> 风控检查
-  -> 交易建议报告
-  -> 人工下单
-  -> 成交回录
-  -> 组合状态与绩效
-```
-
-研究层负责历史数据、特征、信号和回测；组合层负责现金、持仓、成本和成交；建议层将目标仓位转换为具体动作；人工执行层记录真实成交结果。
-
-## 计划技术栈
-
-| 能力 | 技术 | 用途 |
-| --- | --- | --- |
-| Python 环境 | Python 3.11 + uv/Poetry | 固定依赖、复现运行环境 |
-| 数据处理 | pandas，必要时引入 polars | 清洗行情和计算特征 |
-| 回测 | vectorbt；多因子使用确定性目标权重模拟 | 信号扫描、成本分析和组合绩效 |
-| 存储 | Parquet + DuckDB；SQLite | 行情/特征归档；组合和成交记录 |
-| 配置 | YAML | 标的池、策略、成本和风险参数 |
-| 报告 | Jinja2 + HTML，CSV 兜底 | 人工查看、分享和存档 |
-| 测试 | pytest | 数据、信号、仓位和组合状态测试 |
-| 调度 | Windows Task Scheduler / cron | 日线或小时任务 |
-
-## 目标目录结构
-
-```text
-zzQuantBridge/
-├─ pyproject.toml
-├─ README.md
-├─ configs/
-│  ├─ universe.yaml
-│  ├─ strategy.yaml
-│  └─ risk.yaml
-├─ data/
-│  ├─ raw/                 # 原始行情，只追加不覆盖
-│  ├─ processed/           # 清洗后的 OHLCV
-│  ├─ features/            # 特征快照
-│  └─ metadata/            # 数据源、版本、时间范围
-├─ db/
-│  └─ portfolio.sqlite
-├─ src/quant/
-│  ├─ data/                # 数据源适配、校验、清洗
-│  ├─ features/            # 特征计算
-│  ├─ strategies/          # 规则策略和 DRL 推理
-│  ├─ backtest/            # vectorbt 封装和评估
-│  ├─ portfolio/           # 持仓、现金、成交、净值
-│  ├─ risk/                # 敞口、换手、亏损和流动性限制
-│  ├─ signals/             # 目标仓位到交易建议
-│  ├─ reports/             # HTML/CSV 报告
-│  └─ cli.py               # 命令行入口
-├─ tests/
-├─ notebooks/
-└─ runs/YYYY-MM-DD/<run_id>/
-   ├─ input_manifest.json
-   ├─ signals.csv
-   ├─ orders.csv
-   ├─ portfolio_snapshot.json
-   └─ report.html
-```
-
-## 核心数据对象
-
-系统至少区分以下三类对象：
-
-- `TargetPosition`：策略在某一时点希望达到的标的权重、原因和模型版本。
-- `TradeSuggestion`：结合当前组合、价格和风险检查后生成的具体动作、数量和参考价格。
-- `ExecutedTrade`：人工实际完成的成交，包括价格、费用、成交时间和券商参考号。
-
-行情数据至少包含 `symbol`、`timestamp`、`open`、`high`、`low`、`close` 和 `volume`，同时记录数据源、下载时间、时区、频率、复权状态和最后一个完整 bar 的时间。
-
-## 回测与风控要求
-
-回测必须明确处理：
-
-- 手续费、滑点、交易时点和仓位约束
-- 现金约束、基准组合和训练/验证/测试区间
-- 总收益、年化收益、波动率、Sharpe、最大回撤、Calmar、胜率、换手率、交易次数和费用占比
-- 手续费/滑点扩大、信号延迟一个 bar、滚动时间窗口三组敏感性分析
-
-生成建议前必须检查单标的和行业权重、总杠杆、现金缓冲、单日换手、最小成交金额、流动性、亏损与回撤阈值、数据新鲜度以及模型输出异常。检查失败时只记录阻断原因，不放行建议。
-
-## 计划中的 CLI 工作流
-
-以下命令是目标接口，待项目骨架完成后启用：
-
-```bash
-python -m quant download --date 2026-10-08
-python -m quant validate-data --date 2026-10-08
-python -m quant backtest --config configs/strategy.yaml
-python -m quant generate-signals --date 2026-10-08
-python -m quant reconcile --file fills.csv
-python -m quant report --date 2026-10-08
-```
-
-运行失败时不生成“可执行建议”，只保留错误报告和告警信息。每次运行使用唯一 `run_id`，并将输入清单、信号、建议、组合快照和报告保存到对应的 `runs/` 目录。
-
-## 开发路线
-
-| 阶段 | 目标 | 主要验收标准 |
-| --- | --- | --- |
-| M0 | 项目骨架 | 环境可安装、配置可读、CLI 统一入口、pytest 可运行 |
-| M1 | 数据层 | 原始/处理数据分层，重复运行稳定，完成缺失和异常检查 |
-| M2 | 基线策略与回测 | 无未来函数，包含成本和滑点，输出完整绩效与敏感性分析 |
-| M3 | 组合与建议层 | 可导入持仓和现金，生成整数数量建议，建议与成交分离 |
-| M4 | 纸面运行 | 连续运行至少四周，能处理漏跑、重复运行、改仓和对账 |
-| M5 | DRL 接入 | 使用与基线一致的目标仓位接口，并完成公平对比 |
-| M6 | 极小资金实盘 | 仓位与亏损上限生效，kill-switch 可用，每日完成对账 |
-
-推荐先实现买入持有和简单均线策略，再逐步加入成本、延迟、流动性约束和滚动验证；纸面运行至少四周后，再评估是否使用极小资金。
-
-## 停止条件
-
-出现数据源异常、数据时间戳落后、组合无法对账、重复生成建议、成交记录不一致、模型输出异常、超过单日亏损或最大回撤阈值，或无法确认订单状态时，停止执行建议并保留错误与审计记录。
-
-## 相关文档
-
-- [vectorbt 手动执行项目规划](vectorbt-manual-execution-plan.md)
-
-## 免责声明
-
-本项目用于个人量化研究、回测和人工交易辅助，不构成投资建议。任何实盘操作都应由使用者独立确认，并在可承受损失的范围内进行。
+本项目仅用于量化研究、回测和人工交易辅助，不构成投资建议。
